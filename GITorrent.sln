@@ -1,9 +1,9 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
-VisualStudioVersion = 17.13.35931.197 d17.13
+VisualStudioVersion = 17.13.35931.197
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "GTorrent", "GTorrent\GTorrent.csproj", "{31DA7D23-9E11-4A5B-9D3F-ED8F8A066EBF}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "GITorrent", "GTorrent\GITorrent.csproj", "{31DA7D23-9E11-4A5B-9D3F-ED8F8A066EBF}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
