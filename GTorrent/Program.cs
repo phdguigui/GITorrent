@@ -1,31 +1,75 @@
-﻿using System;
+﻿using System.Net;
 using System.Net.Sockets;
-using System.Net;
+using System.Text;
 
-class Program
+UdpClient _udpServer = new(5000);
+Dictionary<string, List<string>> _peerList = [];
+string _clientAddress = string.Empty;
+
+IPEndPoint remoteEP = new IPEndPoint(IPAddress.Any, 0);
+Console.WriteLine($"Tracker iniciado no endereço: {GetCurrentIP()}:5000\n");
+
+while (true)
 {
-    static void Main(string[] args)
+    byte[] data = _udpServer.Receive(ref remoteEP);
+    string message = Encoding.UTF8.GetString(data);
+    _clientAddress = $"{remoteEP.Address}:{remoteEP.Port}";
+    Console.WriteLine($"Recebido de {_clientAddress} # {message}\n");
+
+    if (message == "JOIN_REQUEST")
     {
-        Console.WriteLine("Modo de execução:");
-        Console.WriteLine("1 - Tracker");
-        Console.WriteLine("2 - Peer");
-        Console.WriteLine("3 - File Manager");
-
-        var choice = Console.ReadLine();
-
-        switch (choice)
-        {
-            case "1":
-                new TrackerServer().Start();
-                break;
-            case "2":
-                Console.Write("Digite o Peer ID: ");
-                string peerId = Console.ReadLine();
-                //new PeerClient(peerId).Start();
-                break;
-            default:
-                Console.WriteLine("Opção inválida.");
-                break;
-        }
+        JoinRequestHandler();
+    }
+    if (message.StartsWith("HAVE_PIECE"))
+    {
+        HavePieceHandler(message);
     }
 }
+
+void JoinRequestHandler()
+{
+    string peerAddress = $"{remoteEP.Address}:{remoteEP.Port}";
+
+    if (!_peerList.ContainsKey(peerAddress))
+    {
+        _peerList[peerAddress] = [];
+    }
+
+    StringBuilder responseBuilder = new("PEER_LIST|");
+    foreach (var peer in _peerList)
+    {
+        if(peer.Key != $"{remoteEP.Address}:{remoteEP.Port}")
+        {
+            string pieces = string.Join(",", peer.Value);
+            responseBuilder.Append($"{peer.Key}[{pieces}];");
+        }
+    }
+
+    var response = responseBuilder.ToString() == "PEER_LIST|" ? "PEER_LIST|NONE" : responseBuilder.ToString();
+
+    byte[] responseData = Encoding.UTF8.GetBytes(response.ToString());
+    _udpServer.Send(responseData, responseData.Length, remoteEP);
+    Console.WriteLine($"Enviado para {peerAddress}: {response}\n");
+}
+
+void HavePieceHandler(string message)
+{
+    _peerList[_clientAddress] = message.Split("|")[1].Split(",").ToList();
+}
+
+#region Helpers
+static string GetCurrentIP()
+{
+    var host = Dns.GetHostEntry(Dns.GetHostName());
+
+    foreach (var ip in host.AddressList)
+    {
+        if (ip.AddressFamily == AddressFamily.InterNetwork)
+        {
+            return ip.ToString();
+        }
+    }
+
+    return "";
+}
+#endregion
