@@ -6,6 +6,8 @@ string trackerIp = "192.168.56.1"; // IP do Tracker (você pode passar por arqui
 int trackerPort = 5000;
 string folderPath = @"C:\AaaTeste";
 Dictionary<string, List<string>> _piecesByPeer = new();
+Dictionary<string, List<string>> _peersByPiece = new();
+List<string> _myPieces = new();
 
 UdpClient udpClient = new UdpClient(0);
 
@@ -23,6 +25,7 @@ try
     {
         SendHavePiece(initialPieces);
     }
+    FirstConnection();
 }
 catch (Exception ex)
 {
@@ -74,6 +77,7 @@ void SendJoinRequest()
 
 void SendHavePiece(List<string> pieces)
 {
+    _myPieces = pieces;
     var message = $"HAVE_PIECE|{string.Join(",", pieces)}";
     SendMessageTracker(message);
 }
@@ -96,6 +100,58 @@ string ListenMessageTracker(IPEndPoint trackerEndPoint)
     Console.WriteLine($"Recebido do Tracker: {responseMessage}\n");
 
     return responseMessage;
+}
+
+void FirstConnection()
+{
+    RarestFirst();
+}
+
+void RarestFirst()
+{
+    foreach(var peer in _piecesByPeer)
+    {
+        foreach(var piece in peer.Value)
+        {
+            _peersByPiece[piece].Add(peer.Key);
+        }
+    }
+
+    // Verify rarest piece
+    string rarestPiece = "";
+    int rarestCount = 0;
+    bool firstSearch = true;
+    foreach(var piece in _peersByPiece)
+    {
+        if (_myPieces.Contains(piece.Key))
+        {
+            continue;
+        }
+
+        if (firstSearch)
+        {
+            rarestPiece = piece.Key;
+            rarestCount = piece.Value.Count;
+            continue;
+        }
+        
+        if (piece.Value.Count < rarestCount)
+        {
+            rarestPiece = piece.Key;
+            rarestCount = piece.Value.Count;
+        }
+    }
+
+    var firstIp = _peersByPiece[rarestPiece]?.FirstOrDefault();
+
+    if (firstIp != null)
+    {
+        
+    }
+    else
+    {
+        Console.WriteLine("Nenhum peer disponível para baixar a peça rara.");
+    }
 }
 
 #region Helpers
