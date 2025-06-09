@@ -15,7 +15,7 @@ while (true)
 {
     byte[] data = _udpServer.Receive(ref remoteEP);
     string message = Encoding.UTF8.GetString(data);
-    _clientAddress = $"{remoteEP.Address}:{remoteEP.Port}";
+    _clientAddress = $"{remoteEP.Address}";
     Console.WriteLine($"Recebido de {_clientAddress} # {message}\n");
 
     if (message == "JOIN_REQUEST")
@@ -30,7 +30,7 @@ while (true)
 
 void JoinRequestHandler()
 {
-    string peerAddress = $"{remoteEP.Address}:{remoteEP.Port}";
+    string peerAddress = $"{remoteEP.Address}";
 
     if (!_peerList.ContainsKey(peerAddress))
     {
@@ -40,7 +40,7 @@ void JoinRequestHandler()
     StringBuilder responseBuilder = new("PEER_LIST|");
     foreach (var peer in _peerList)
     {
-        if(peer.Key != $"{remoteEP.Address}:{remoteEP.Port}")
+        if(peer.Key != $"{remoteEP.Address}")
         {
             string pieces = string.Join(",", peer.Value);
             responseBuilder.Append($"{peer.Key}[{pieces}];");
