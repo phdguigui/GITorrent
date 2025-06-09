@@ -4,10 +4,12 @@ using System.Text;
 
 string trackerIp = "192.168.56.1"; // IP do Tracker (você pode passar por arquivo depois)
 int trackerPort = 5000;
-string folderPath = @"C:\AaaTeste";
+string folderPath = @"C:\AaaTeste2";
 Dictionary<string, List<string>> _piecesByPeer = new();
 Dictionary<string, List<string>> _peersByPiece = new();
 List<string> _myPieces = new();
+bool _amISeeder = false;
+int _fileLength = 0;
 
 UdpClient udpClient = new UdpClient(0);
 
@@ -21,11 +23,18 @@ try
 
     SendJoinRequest();
     var initialPieces = VerifyPieces();
+    if (_amISeeder || initialPieces.Count == _fileLength)
+    {
+        _amISeeder = true;
+    }
     if (initialPieces.Count > 0)
     {
         SendHavePiece(initialPieces);
     }
-    FirstConnection();
+    if (!_amISeeder)
+    {
+        FirstConnection();
+    }
 }
 catch (Exception ex)
 {
@@ -58,12 +67,12 @@ void SendJoinRequest()
     var trackerEndpoint = SendMessageTracker("JOIN_REQUEST");
     var peersAndPieces = ListenMessageTracker(trackerEndpoint);
 
-    var isFirstPeer = peersAndPieces.Split("|")[1].ToString() == "NONE";
+    _amISeeder = peersAndPieces.Split("|")[1].ToString() == "NONE";
 
-    if (!isFirstPeer)
+    if (!_amISeeder)
     {
         // 192.168.0.1[1,2,3]
-        var piersAndPiecesFormatted = peersAndPieces.Remove(peersAndPieces.Length-1).Split("|")[1].Split(";").ToList();
+        var piersAndPiecesFormatted = peersAndPieces.Split("|")[1].Split(" ")[0].Remove(peersAndPieces.Split("|")[1].Split(" ")[0].Length - 1).Split(";");
 
         foreach (var peer in piersAndPiecesFormatted)
         {
@@ -72,13 +81,15 @@ void SendJoinRequest()
                 peer.Split("[")[0],
                 hasPiece ? peer.Split("[")[1].Split(",").Select(x => x.Replace("]", "")).ToList() : new());
         }
+
+        _fileLength = int.Parse(peersAndPieces.Split("SIZE")[1]);
     }
 }
 
 void SendHavePiece(List<string> pieces)
 {
     _myPieces = pieces;
-    var message = $"HAVE_PIECE|{string.Join(",", pieces)}";
+    var message = $"HAVE_PIECE{(_amISeeder ? "_SEEDER" : "")}|{string.Join(",", pieces)}";
     SendMessageTracker(message);
 }
 
@@ -109,10 +120,14 @@ void FirstConnection()
 
 void RarestFirst()
 {
-    foreach(var peer in _piecesByPeer)
+    foreach (var peer in _piecesByPeer)
     {
-        foreach(var piece in peer.Value)
+        foreach (var piece in peer.Value)
         {
+            if (!_peersByPiece.ContainsKey(piece))
+            {
+                _peersByPiece[piece] = new List<string>();
+            }
             _peersByPiece[piece].Add(peer.Key);
         }
     }

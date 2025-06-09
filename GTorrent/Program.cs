@@ -5,6 +5,7 @@ using System.Text;
 UdpClient _udpServer = new(5000);
 Dictionary<string, List<string>> _peerList = [];
 string _clientAddress = string.Empty;
+int _fileLength = 0;
 
 IPEndPoint remoteEP = new IPEndPoint(IPAddress.Any, 0);
 Console.WriteLine($"Tracker iniciado no endereço: {GetCurrentIP()}:5000\n");
@@ -46,6 +47,7 @@ void JoinRequestHandler()
     }
 
     var response = responseBuilder.ToString() == "PEER_LIST|" ? "PEER_LIST|NONE" : responseBuilder.ToString();
+    response += _fileLength == 0 ? "" : $" SIZE{_fileLength}";
 
     byte[] responseData = Encoding.UTF8.GetBytes(response.ToString());
     _udpServer.Send(responseData, responseData.Length, remoteEP);
@@ -55,6 +57,10 @@ void JoinRequestHandler()
 void HavePieceHandler(string message)
 {
     _peerList[_clientAddress] = message.Split("|")[1].Split(",").ToList();
+    if (message.Contains("SEEDER"))
+    {
+        _fileLength = _peerList[_clientAddress].Count;
+    }
 }
 
 #region Helpers
