@@ -2,7 +2,7 @@
 using System.Net.Sockets;
 using System.Text;
 
-string trackerIp = "192.168.56.1"; // IP do Tracker (você pode passar por arquivo depois)
+string trackerIp = "192.168.0.242";
 int trackerPort = 5000;
 string folderPath = @"C:\AaaTeste2";
 Dictionary<string, List<string>> _piecesByPeer = new();
@@ -22,6 +22,8 @@ try
     Console.WriteLine($"Porta local escolhida: {localPort}\n");
 
     SendJoinRequest();
+    StartPeerServer();
+
     var initialPieces = VerifyPieces();
     if (_amISeeder || initialPieces.Count == _fileLength)
     {
@@ -147,6 +149,7 @@ void RarestFirst()
         {
             rarestPiece = piece.Key;
             rarestCount = piece.Value.Count;
+            firstSearch = false;
             continue;
         }
         
@@ -159,14 +162,82 @@ void RarestFirst()
 
     var firstIp = _peersByPiece[rarestPiece]?.FirstOrDefault();
 
-    if (firstIp != null)
+    RequestPieceFromPeer(firstIp!, rarestPiece);
+}
+
+void RequestPieceFromPeer(string peerIp, string piece)
+{
+    try
     {
-        
+        using TcpClient client = new TcpClient();
+        client.Connect(IPAddress.Parse(peerIp), 6000);
+
+        using NetworkStream stream = client.GetStream();
+        byte[] requestBytes = Encoding.UTF8.GetBytes(piece);
+        stream.Write(requestBytes, 0, requestBytes.Length);
+
+        Console.WriteLine($"Solicitada peça '{piece}' do peer {peerIp}");
+
+        using MemoryStream ms = new();
+        byte[] buffer = new byte[1024];
+        int bytesRead;
+        while ((bytesRead = stream.Read(buffer, 0, buffer.Length)) > 0)
+        {
+            ms.Write(buffer, 0, bytesRead);
+        }
+
+        string filePath = Path.Combine(folderPath, piece + ".txt");
+        File.WriteAllBytes(filePath, ms.ToArray());
+        Console.WriteLine($"Peça '{piece}' recebida e salva em '{filePath}'");
+
+        _myPieces.Add(piece);
+        SendHavePiece(_myPieces);
     }
-    else
+    catch (Exception ex)
     {
-        Console.WriteLine("Nenhum peer disponível para baixar a peça rara.");
+        Console.WriteLine($"Erro ao requisitar peça '{piece}' do peer {peerIp}: {ex.Message}");
     }
+}
+
+void StartPeerServer()
+{
+    new Thread(() =>
+    {
+        TcpListener listener = new TcpListener(IPAddress.Any, 6000);
+        listener.Start();
+        Console.WriteLine("Servidor TCP iniciado na porta 6000.");
+
+        while (true)
+        {
+            try
+            {
+                using TcpClient client = listener.AcceptTcpClient();
+                using NetworkStream stream = client.GetStream();
+
+                byte[] buffer = new byte[1024];
+                int bytesRead = stream.Read(buffer, 0, buffer.Length);
+                string requestedPiece = Encoding.UTF8.GetString(buffer, 0, bytesRead);
+
+                Console.WriteLine($"Requisição recebida para a peça '{requestedPiece}'");
+
+                string filePath = Path.Combine(folderPath, requestedPiece + ".txt");
+                if (File.Exists(filePath))
+                {
+                    byte[] fileData = File.ReadAllBytes(filePath);
+                    stream.Write(fileData, 0, fileData.Length);
+                    Console.WriteLine($"Peça '{requestedPiece}' enviada com sucesso.");
+                }
+                else
+                {
+                    Console.WriteLine($"Peça '{requestedPiece}' não encontrada.");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("Erro ao responder requisição de peça: " + ex.Message);
+            }
+        }
+    }).Start();
 }
 
 #region Helpers

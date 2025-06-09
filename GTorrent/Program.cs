@@ -1,4 +1,5 @@
 ﻿using System.Net;
+using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using System.Text;
 
@@ -66,16 +67,30 @@ void HavePieceHandler(string message)
 #region Helpers
 static string GetCurrentIP()
 {
-    var host = Dns.GetHostEntry(Dns.GetHostName());
-
-    foreach (var ip in host.AddressList)
+    foreach (NetworkInterface ni in NetworkInterface.GetAllNetworkInterfaces())
     {
-        if (ip.AddressFamily == AddressFamily.InterNetwork)
+        if (ni.OperationalStatus == OperationalStatus.Up &&
+            ni.NetworkInterfaceType != NetworkInterfaceType.Loopback &&
+            ni.NetworkInterfaceType != NetworkInterfaceType.Tunnel)
         {
-            return ip.ToString();
+            IPInterfaceProperties ipProps = ni.GetIPProperties();
+
+            // Verifica se há gateway padrão (sugere acesso à internet)
+            bool hasGateway = ipProps.GatewayAddresses.Any(g => g.Address.AddressFamily == AddressFamily.InterNetwork);
+
+            if (hasGateway)
+            {
+                foreach (UnicastIPAddressInformation ip in ipProps.UnicastAddresses)
+                {
+                    if (ip.Address.AddressFamily == AddressFamily.InterNetwork)
+                    {
+                        return ip.Address.ToString();
+                    }
+                }
+            }
         }
     }
 
-    return "";
+    return "127.0.0.1"; // fallback
 }
 #endregion
