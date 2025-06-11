@@ -4,12 +4,13 @@ using System.Text;
 
 string trackerIp = "192.168.0.242";
 int trackerPort = 5000;
-string folderPath = @"C:\AaaTeste2";
+string folderPath = @"C:\TorrentPieces";
 Dictionary<string, List<string>> _piecesByPeer = new();
 Dictionary<string, List<string>> _peersByPiece = new();
 List<string> _myPieces = new();
 bool _amISeeder = false;
 int _fileLength = 0;
+object myPiecesLock = new();
 
 UdpClient udpClient = new UdpClient(0);
 
@@ -23,6 +24,17 @@ try
 
     SendJoinRequest();
     StartPeerServer();
+
+    // Envia periodicamente ao tracker as peças que possui
+    new Thread(() =>
+    {
+        while (true)
+        {
+            Thread.Sleep(3000); // 3 segundos
+            SendHavePiece(_myPieces);
+        }
+    })
+    { IsBackground = true }.Start();
 
     var initialPieces = VerifyPieces();
     if (_amISeeder || initialPieces.Count == _fileLength)
@@ -122,6 +134,7 @@ void FirstConnection()
 
 void RarestFirst()
 {
+    // Monta o dicionário de quais peers possuem cada peça
     foreach (var peer in _piecesByPeer)
     {
         foreach (var piece in peer.Value)
@@ -134,35 +147,77 @@ void RarestFirst()
         }
     }
 
-    // Verify rarest piece
-    string rarestPiece = "";
-    int rarestCount = 0;
-    bool firstSearch = true;
-    foreach(var piece in _peersByPiece)
-    {
-        if (_myPieces.Contains(piece.Key))
-        {
-            continue;
-        }
+    var missingPieces = _peersByPiece
+        .Where(p => !_myPieces.Contains(p.Key))
+        .OrderBy(p => p.Value.Count)
+        .ToList();
 
-        if (firstSearch)
+    if (missingPieces.Count == 0)
+        return;
+
+    var random = new Random();
+
+    // Divide as peças em dois grupos para baixar em paralelo
+    var piecesForFirstPeer = new List<(string piece, string peerIp)>();
+    var piecesForRandomPeer = new List<(string piece, string peerIp)>();
+
+    foreach (var pieceEntry in missingPieces)
+    {
+        string piece = pieceEntry.Key;
+        var peers = pieceEntry.Value;
+
+        // Sempre adiciona para o primeiro peer
+        var firstPeer = peers.FirstOrDefault();
+        if (firstPeer != null)
+            piecesForFirstPeer.Add((piece, firstPeer));
+
+        // Seleciona um peer aleatório diferente do primeiro, se possível
+        var randomPeers = peers.Where(p => p != firstPeer).ToList();
+        if (randomPeers.Count > 0)
         {
-            rarestPiece = piece.Key;
-            rarestCount = piece.Value.Count;
-            firstSearch = false;
-            continue;
-        }
-        
-        if (piece.Value.Count < rarestCount)
-        {
-            rarestPiece = piece.Key;
-            rarestCount = piece.Value.Count;
+            var randomPeer = randomPeers[random.Next(randomPeers.Count)];
+            piecesForRandomPeer.Add((piece, randomPeer));
         }
     }
 
-    var firstIp = _peersByPiece[rarestPiece]?.FirstOrDefault();
+    // Baixa em paralelo dos dois grupos, com lock para evitar duplicidade
+    var task1 = Task.Run(() =>
+    {
+        foreach (var (piece, peerIp) in piecesForFirstPeer)
+        {
+            bool deveBaixar = false;
+            lock (myPiecesLock)
+            {
+                if (!_myPieces.Contains(piece))
+                {
+                    _myPieces.Add(piece); // Reserva a peça para esta thread
+                    deveBaixar = true;
+                }
+            }
+            if (deveBaixar)
+                RequestPieceFromPeer(peerIp, piece);
+        }
+    });
 
-    RequestPieceFromPeer(firstIp!, rarestPiece);
+    var task2 = Task.Run(() =>
+    {
+        foreach (var (piece, peerIp) in piecesForRandomPeer)
+        {
+            bool deveBaixar = false;
+            lock (myPiecesLock)
+            {
+                if (!_myPieces.Contains(piece))
+                {
+                    _myPieces.Add(piece); // Reserva a peça para esta thread
+                    deveBaixar = true;
+                }
+            }
+            if (deveBaixar)
+                RequestPieceFromPeer(peerIp, piece);
+        }
+    });
+
+    Task.WaitAll(task1, task2);
 }
 
 void RequestPieceFromPeer(string peerIp, string piece)
@@ -191,7 +246,6 @@ void RequestPieceFromPeer(string peerIp, string piece)
         Console.WriteLine($"Peça '{piece}' recebida e salva em '{filePath}'");
 
         _myPieces.Add(piece);
-        SendHavePiece(_myPieces);
     }
     catch (Exception ex)
     {
