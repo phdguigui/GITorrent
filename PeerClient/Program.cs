@@ -1,4 +1,5 @@
-﻿using System.Net;
+﻿using System.IO.Pipelines;
+using System.Net;
 using System.Net.Sockets;
 using System.Text;
 
@@ -126,7 +127,7 @@ string ListenMessageTracker(IPEndPoint trackerEndPoint)
 {
     var response = udpClient.Receive(ref trackerEndPoint);
     string responseMessage = Encoding.UTF8.GetString(response);
-    Console.WriteLine($"Recebido do Tracker: {responseMessage}\n");
+    Console.WriteLine($"{DateTime.Now:dd/MM/yyyy HH:mm:ss} | <= (Tracker): {responseMessage}");
 
     return responseMessage;
 }
@@ -235,7 +236,7 @@ void RequestPieceFromPeer(string peerIp, string piece)
         byte[] requestBytes = Encoding.UTF8.GetBytes(piece);
         stream.Write(requestBytes, 0, requestBytes.Length);
 
-        Console.WriteLine($"Solicitada peça '{piece}' do peer {peerIp}");
+        Console.WriteLine($"{DateTime.Now:dd/MM/yyyy HH:mm:ss} | => ({peerIp}): Peça '{piece}' solicitada");
 
         using MemoryStream ms = new();
         byte[] buffer = new byte[1024];
@@ -247,13 +248,13 @@ void RequestPieceFromPeer(string peerIp, string piece)
 
         string filePath = Path.Combine(folderPath, piece + ".txt");
         File.WriteAllBytes(filePath, ms.ToArray());
-        Console.WriteLine($"Peça '{piece}' recebida e salva em '{filePath}'");
+        Console.WriteLine($"{DateTime.Now:dd/MM/yyyy HH:mm:ss} | <= ({peerIp}): Peça '{piece}' recebida");
 
         _myPieces.Add(piece);
     }
     catch (Exception ex)
     {
-        Console.WriteLine($"Erro ao requisitar peça '{piece}' do peer {peerIp}: {ex.Message}");
+        Console.WriteLine($"{DateTime.Now:dd/MM/yyyy HH:mm:ss} | <= ({peerIp}): Erro ao requisitar peça '{piece}': {ex.Message}");
     }
 }
 
@@ -270,29 +271,30 @@ void StartPeerServer()
             try
             {
                 using TcpClient client = listener.AcceptTcpClient();
+                string clientIp = ((IPEndPoint)client.Client.RemoteEndPoint).Address.ToString();
                 using NetworkStream stream = client.GetStream();
 
                 byte[] buffer = new byte[1024];
                 int bytesRead = stream.Read(buffer, 0, buffer.Length);
                 string requestedPiece = Encoding.UTF8.GetString(buffer, 0, bytesRead);
 
-                Console.WriteLine($"Requisição recebida para a peça '{requestedPiece}'");
+                Console.WriteLine($"{DateTime.Now:dd/MM/yyyy HH:mm:ss} | <= ({clientIp}): Peça '{requestedPiece}' requisitada");
 
                 string filePath = Path.Combine(folderPath, requestedPiece + ".txt");
                 if (File.Exists(filePath))
                 {
                     byte[] fileData = File.ReadAllBytes(filePath);
                     stream.Write(fileData, 0, fileData.Length);
-                    Console.WriteLine($"Peça '{requestedPiece}' enviada com sucesso.");
+                    Console.WriteLine($"{DateTime.Now:dd/MM/yyyy HH:mm:ss} | => ({clientIp}): Peça '{requestedPiece}' enviada");
                 }
                 else
                 {
-                    Console.WriteLine($"Peça '{requestedPiece}' não encontrada.");
+                    Console.WriteLine($"{DateTime.Now:dd/MM/yyyy HH:mm:ss} | => ({clientIp}): Peça '{requestedPiece}' requisitada não encontrada");
                 }
             }
             catch (Exception ex)
             {
-                Console.WriteLine("Erro ao responder requisição de peça: " + ex.Message);
+                Console.WriteLine($"{DateTime.Now:dd/MM/yyyy HH:mm:ss} | (Interno): Falha ao enviar peça requisitada: " + ex.Message);
             }
         }
     }).Start();
