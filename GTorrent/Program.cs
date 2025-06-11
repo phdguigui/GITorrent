@@ -16,14 +16,16 @@ while (true)
     byte[] data = _udpServer.Receive(ref remoteEP);
     string message = Encoding.UTF8.GetString(data);
     _clientAddress = $"{remoteEP.Address}";
-    Console.WriteLine($"Recebido de {_clientAddress} # {message}\n");
+    //Console.WriteLine($"Recebido de {_clientAddress} # {message}\n");
 
     if (message == "JOIN_REQUEST")
     {
+        Console.WriteLine($"{DateTime.Now:dd/MM/yyyy HH:mm:ss} | <= ({_clientAddress}): {message}");
         JoinRequestHandler();
     }
     if (message.StartsWith("HAVE_PIECE"))
     {
+        Console.WriteLine($"{DateTime.Now:dd/MM/yyyy HH:mm:ss} | <= ({_clientAddress}): Atualização de peças");
         HavePieceHandler(message);
     }
 }
@@ -52,7 +54,8 @@ void JoinRequestHandler()
 
     byte[] responseData = Encoding.UTF8.GetBytes(response.ToString());
     _udpServer.Send(responseData, responseData.Length, remoteEP);
-    Console.WriteLine($"Enviado para {peerAddress}: {response}\n");
+    //Console.WriteLine($"Enviado para {peerAddress}: {response}\n");
+    Console.WriteLine($"{DateTime.Now:dd/MM/yyyy HH:mm:ss} | => ({peerAddress}): Lista de peers e respectivos pedaços");
 }
 
 void HavePieceHandler(string message)

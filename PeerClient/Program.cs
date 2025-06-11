@@ -113,7 +113,11 @@ IPEndPoint SendMessageTracker(string message)
     IPEndPoint trackerEndPoint = new IPEndPoint(IPAddress.Parse(trackerIp), trackerPort);
 
     udpClient.Send(data, data.Length, trackerEndPoint);
-    Console.WriteLine($"Enviado para Tracker: {message}\n");
+    if (message.Contains("HAVE_PIECE"))
+    {
+        message = "Atualização de peças";
+    }
+    Console.WriteLine($"{DateTime.Now:dd/MM/yyyy HH:mm:ss} | => (Tracker): {message}");
 
     return trackerEndPoint;
 }
