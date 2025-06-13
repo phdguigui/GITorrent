@@ -25,6 +25,7 @@ try
 
     var peerIps = SendJoinRequest();
     StartPeerServer();
+    StartNotificationServer();
     NotifyPeersAboutJoin(peerIps, localPort);
 
     // Envia periodicamente ao tracker as peças que possui
