@@ -300,6 +300,27 @@ void StartPeerServer()
     }).Start();
 }
 
+void NotifyPeersAboutJoin(List<string> peerIps, int localPort)
+{
+    foreach (var peerIp in peerIps)
+    {
+        if (peerIp == GetCurrentIP()) continue; // Não notifica a si mesmo
+        try
+        {
+            using TcpClient client = new TcpClient();
+            client.Connect(IPAddress.Parse(peerIp), 6001); // Porta de notificação
+            using NetworkStream stream = client.GetStream();
+            string msg = $"NEW_PEER|{GetCurrentIP()}|{localPort}";
+            byte[] data = Encoding.UTF8.GetBytes(msg);
+            stream.Write(data, 0, data.Length);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Falha ao notificar peer {peerIp}: {ex.Message}");
+        }
+    }
+}
+
 #region Helpers
 static string GetCurrentIP()
 {
