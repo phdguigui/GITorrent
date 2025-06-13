@@ -23,8 +23,9 @@ try
     Console.WriteLine($"IP local detectado: {localIp}");
     Console.WriteLine($"Porta local escolhida: {localPort}\n");
 
-    SendJoinRequest();
+    var peerIps = SendJoinRequest();
     StartPeerServer();
+    NotifyPeersAboutJoin(peerIps, localPort);
 
     // Envia periodicamente ao tracker as peças que possui
     new Thread(() =>
@@ -77,28 +78,32 @@ List<string> VerifyPieces()
     }
 }
 
-void SendJoinRequest()
+List<string> SendJoinRequest()
 {
     var trackerEndpoint = SendMessageTracker("JOIN_REQUEST");
     var peersAndPieces = ListenMessageTracker(trackerEndpoint);
 
     _amISeeder = peersAndPieces.Split("|")[1].ToString() == "NONE";
 
+    var peerIps = new List<string>();
+
     if (!_amISeeder)
     {
-        // 192.168.0.1[1,2,3]
         var piersAndPiecesFormatted = peersAndPieces.Split("|")[1].Split(" ")[0].Remove(peersAndPieces.Split("|")[1].Split(" ")[0].Length - 1).Split(";");
 
         foreach (var peer in piersAndPiecesFormatted)
         {
             var hasPiece = peer.Split("[")[1] != "]";
+            var ip = peer.Split("[")[0];
             _piecesByPeer.Add(
-                peer.Split("[")[0],
+                ip,
                 hasPiece ? peer.Split("[")[1].Split(",").Select(x => x.Replace("]", "")).ToList() : new());
+            peerIps.Add(ip);
         }
 
         _fileLength = int.Parse(peersAndPieces.Split("SIZE")[1]);
     }
+    return peerIps;
 }
 
 void SendHavePiece(List<string> pieces)
@@ -319,6 +324,53 @@ void NotifyPeersAboutJoin(List<string> peerIps, int localPort)
             Console.WriteLine($"Falha ao notificar peer {peerIp}: {ex.Message}");
         }
     }
+}
+
+void StartNotificationServer()
+{
+    new Thread(() =>
+    {
+        TcpListener listener = new TcpListener(IPAddress.Any, 6001);
+        listener.Start();
+        Console.WriteLine("Servidor de notificação iniciado na porta 6001.");
+
+        while (true)
+        {
+            try
+            {
+                using TcpClient client = listener.AcceptTcpClient();
+                using NetworkStream stream = client.GetStream();
+                byte[] buffer = new byte[1024];
+                int bytesRead = stream.Read(buffer, 0, buffer.Length);
+                string message = Encoding.UTF8.GetString(buffer, 0, bytesRead);
+
+                if (message.StartsWith("NEW_PEER|"))
+                {
+                    var parts = message.Split('|');
+                    string newPeerIp = parts[1];
+                    int newPeerPort = int.Parse(parts[2]);
+                    Console.WriteLine($"Novo peer entrou na rede: {newPeerIp}:{newPeerPort}");
+
+                    // Verifica se tem menos de 2 conexões (simples: conta quantos peers diferentes já tem)
+                    lock (_piecesByPeer)
+                    {
+                        if (_piecesByPeer.Count < 2 && !_piecesByPeer.ContainsKey(newPeerIp))
+                        {
+                            // Adiciona o novo peer para download
+                            _piecesByPeer[newPeerIp] = new List<string>(); // Inicializa vazio, pode atualizar depois
+                            // Aqui você pode chamar RarestFirst() ou lógica de download para iniciar download desse peer
+                            Console.WriteLine($"Iniciando download de peças do novo peer {newPeerIp}");
+                            // Exemplo: RequestPieceFromPeer(newPeerIp, "1"); // ou chame RarestFirst()
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("Erro ao receber notificação de novo peer: " + ex.Message);
+            }
+        }
+    }).Start();
 }
 
 #region Helpers
