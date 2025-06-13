@@ -1,5 +1,4 @@
-﻿using System.IO.Pipelines;
-using System.Net;
+﻿using System.Net;
 using System.Net.Sockets;
 using System.Text;
 
@@ -13,12 +12,13 @@ bool _amISeeder = false;
 int _fileLength = 0;
 object myPiecesLock = new();
 
-UdpClient udpClient = new UdpClient(0);
+UdpClient udpClient = new(0);
 
 try
 {
     string localIp = GetCurrentIP();
-    int localPort = (udpClient.Client.LocalEndPoint as IPEndPoint).Port;
+    int localPort = (udpClient.Client?.LocalEndPoint as IPEndPoint)?.Port ??
+        throw new InvalidOperationException("LocalEndPoint ou Port não está definido.");
 
     Console.WriteLine($"IP local detectado: {localIp}");
     Console.WriteLine($"Porta local escolhida: {localPort}\n");
@@ -230,7 +230,7 @@ void RequestPieceFromPeer(string peerIp, string piece)
 {
     try
     {
-        using TcpClient client = new TcpClient();
+        using TcpClient client = new();
         client.Connect(IPAddress.Parse(peerIp), 6000);
 
         using NetworkStream stream = client.GetStream();
@@ -263,7 +263,7 @@ void StartPeerServer()
 {
     new Thread(() =>
     {
-        TcpListener listener = new TcpListener(IPAddress.Any, 6000);
+        TcpListener listener = new(IPAddress.Any, 6000);
         listener.Start();
         Console.WriteLine("Servidor TCP iniciado na porta 6000.");
 
@@ -272,7 +272,13 @@ void StartPeerServer()
             try
             {
                 using TcpClient client = listener.AcceptTcpClient();
-                string clientIp = ((IPEndPoint)client.Client.RemoteEndPoint).Address.ToString();
+                if (client.Client?.RemoteEndPoint is not IPEndPoint remoteEndPoint)
+                {
+                    Console.WriteLine("Falha ao obter o endereço remoto do cliente.");
+                    continue;
+                }
+
+                string clientIp = remoteEndPoint.Address.ToString();
                 using NetworkStream stream = client.GetStream();
 
                 byte[] buffer = new byte[1024];
@@ -308,7 +314,7 @@ void NotifyPeersAboutJoin(List<string> peerIps, int localPort)
         if (peerIp == GetCurrentIP()) continue;
         try
         {
-            using TcpClient client = new TcpClient();
+            using TcpClient client = new ();
             client.Connect(IPAddress.Parse(peerIp), 6001);
             using NetworkStream stream = client.GetStream();
             string msg = $"NEW_PEER|{GetCurrentIP()}|{localPort}";
@@ -326,7 +332,7 @@ void StartNotificationServer()
 {
     new Thread(() =>
     {
-        TcpListener listener = new TcpListener(IPAddress.Any, 6001);
+        TcpListener listener = new(IPAddress.Any, 6001);
         listener.Start();
         Console.WriteLine("Servidor de notificação iniciado na porta 6001.");
 
@@ -351,7 +357,7 @@ void StartNotificationServer()
                     {
                         if (_piecesByPeer.Count < 2 && !_piecesByPeer.ContainsKey(newPeerIp))
                         {
-                            _piecesByPeer[newPeerIp] = new List<string>();
+                            _piecesByPeer[newPeerIp] = [];
                             Console.WriteLine($"Iniciando download de peças do novo peer {newPeerIp}");
                             // Chamar download de peer a partir daqui
                         }
