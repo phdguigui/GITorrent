@@ -145,7 +145,6 @@ void FirstConnection()
 
 void RarestFirst()
 {
-    // Monta o dicionário de quais peers possuem cada peça
     foreach (var peer in _piecesByPeer)
     {
         foreach (var piece in peer.Value)
@@ -168,7 +167,6 @@ void RarestFirst()
 
     var random = new Random();
 
-    // Divide as peças em dois grupos para baixar em paralelo
     var piecesForFirstPeer = new List<(string piece, string peerIp)>();
     var piecesForRandomPeer = new List<(string piece, string peerIp)>();
 
@@ -177,12 +175,10 @@ void RarestFirst()
         string piece = pieceEntry.Key;
         var peers = pieceEntry.Value;
 
-        // Sempre adiciona para o primeiro peer
         var firstPeer = peers.FirstOrDefault();
         if (firstPeer != null)
             piecesForFirstPeer.Add((piece, firstPeer));
 
-        // Seleciona um peer aleatório diferente do primeiro, se possível
         var randomPeers = peers.Where(p => p != firstPeer).ToList();
         if (randomPeers.Count > 0)
         {
@@ -191,7 +187,6 @@ void RarestFirst()
         }
     }
 
-    // Baixa em paralelo dos dois grupos, com lock para evitar duplicidade
     var task1 = Task.Run(() =>
     {
         foreach (var (piece, peerIp) in piecesForFirstPeer)
@@ -201,7 +196,7 @@ void RarestFirst()
             {
                 if (!_myPieces.Contains(piece))
                 {
-                    _myPieces.Add(piece); // Reserva a peça para esta thread
+                    _myPieces.Add(piece);
                     deveBaixar = true;
                 }
             }
@@ -219,7 +214,7 @@ void RarestFirst()
             {
                 if (!_myPieces.Contains(piece))
                 {
-                    _myPieces.Add(piece); // Reserva a peça para esta thread
+                    _myPieces.Add(piece);
                     deveBaixar = true;
                 }
             }
@@ -310,11 +305,11 @@ void NotifyPeersAboutJoin(List<string> peerIps, int localPort)
 {
     foreach (var peerIp in peerIps)
     {
-        if (peerIp == GetCurrentIP()) continue; // Não notifica a si mesmo
+        if (peerIp == GetCurrentIP()) continue;
         try
         {
             using TcpClient client = new TcpClient();
-            client.Connect(IPAddress.Parse(peerIp), 6001); // Porta de notificação
+            client.Connect(IPAddress.Parse(peerIp), 6001);
             using NetworkStream stream = client.GetStream();
             string msg = $"NEW_PEER|{GetCurrentIP()}|{localPort}";
             byte[] data = Encoding.UTF8.GetBytes(msg);
@@ -352,16 +347,13 @@ void StartNotificationServer()
                     int newPeerPort = int.Parse(parts[2]);
                     Console.WriteLine($"Novo peer entrou na rede: {newPeerIp}:{newPeerPort}");
 
-                    // Verifica se tem menos de 2 conexões (simples: conta quantos peers diferentes já tem)
                     lock (_piecesByPeer)
                     {
                         if (_piecesByPeer.Count < 2 && !_piecesByPeer.ContainsKey(newPeerIp))
                         {
-                            // Adiciona o novo peer para download
-                            _piecesByPeer[newPeerIp] = new List<string>(); // Inicializa vazio, pode atualizar depois
-                            // Aqui você pode chamar RarestFirst() ou lógica de download para iniciar download desse peer
+                            _piecesByPeer[newPeerIp] = new List<string>();
                             Console.WriteLine($"Iniciando download de peças do novo peer {newPeerIp}");
-                            // Exemplo: RequestPieceFromPeer(newPeerIp, "1"); // ou chame RarestFirst()
+                            // Chamar download de peer a partir daqui
                         }
                     }
                 }
