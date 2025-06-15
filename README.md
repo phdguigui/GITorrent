@@ -1,7 +1,7 @@
 # 🚀 GITorrent - BitTorrent-Inspired P2P Protocol
 
 GITorrent is an **experimental peer-to-peer (P2P) protocol** for file sharing, inspired by the BitTorrent protocol.  
-The system is composed of two main modules: **Tracker** and **PeerClient**.
+The system is composed of two main modules: **Tracker** and **PeerClient**. 
 
 ---
 
