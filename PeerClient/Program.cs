@@ -240,7 +240,7 @@ void RequestPieceFromPeer(string peerIp, string piece)
         Console.WriteLine($"{DateTime.Now:dd/MM/yyyy HH:mm:ss} | => ({peerIp}): Peça '{piece}' solicitada");
 
         using MemoryStream ms = new();
-        byte[] buffer = new byte[1024];
+        byte[] buffer = new byte[4096];
         int bytesRead;
         while ((bytesRead = stream.Read(buffer, 0, buffer.Length)) > 0)
         {
@@ -281,7 +281,7 @@ void StartPeerServer()
                 string clientIp = remoteEndPoint.Address.ToString();
                 using NetworkStream stream = client.GetStream();
 
-                byte[] buffer = new byte[1024];
+                byte[] buffer = new byte[4096];
                 int bytesRead = stream.Read(buffer, 0, buffer.Length);
                 string requestedPiece = Encoding.UTF8.GetString(buffer, 0, bytesRead);
 
