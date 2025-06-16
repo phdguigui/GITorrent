@@ -274,7 +274,7 @@ void StartPeerServer()
                 using TcpClient client = listener.AcceptTcpClient();
                 if (client.Client?.RemoteEndPoint is not IPEndPoint remoteEndPoint)
                 {
-                    Console.WriteLine("Falha ao obter o endereço remoto do cliente.");
+                    Console.WriteLine($"{DateTime.Now:dd/MM/yyyy HH:mm:ss} | (Interno): Falha ao obter o endereço remoto do cliente.");
                     continue;
                 }
 
@@ -317,13 +317,13 @@ void NotifyPeersAboutJoin(List<string> peerIps, int localPort)
             using TcpClient client = new ();
             client.Connect(IPAddress.Parse(peerIp), 6001);
             using NetworkStream stream = client.GetStream();
-            string msg = $"NEW_PEER|{GetCurrentIP()}|{localPort}";
+            string msg = $"NEW_PEER|{GetCurrentIP()}|{string.Join(",", _myPieces)}";
             byte[] data = Encoding.UTF8.GetBytes(msg);
             stream.Write(data, 0, data.Length);
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Falha ao notificar peer {peerIp}: {ex.Message}");
+            Console.WriteLine($"{DateTime.Now:dd/MM/yyyy HH:mm:ss} | (Interno): Falha ao notificar peer {peerIp}: {ex.Message}");
         }
     }
 }
@@ -350,16 +350,43 @@ void StartNotificationServer()
                 {
                     var parts = message.Split('|');
                     string newPeerIp = parts[1];
-                    int newPeerPort = int.Parse(parts[2]);
-                    Console.WriteLine($"Novo peer entrou na rede: {newPeerIp}:{newPeerPort}");
+                    List<string> pieces = parts.Length > 2 && !string.IsNullOrWhiteSpace(parts[2])
+                        ? parts[2].Split(',').ToList()
+                        : new();
+                    _piecesByPeer[newPeerIp] = pieces;
+
+                    Console.WriteLine($"{DateTime.Now:dd/MM/yyyy HH:mm:ss} | ({newPeerIp}): Novo peer entrou na rede");
 
                     lock (_piecesByPeer)
                     {
                         if (_piecesByPeer.Count < 2 && !_piecesByPeer.ContainsKey(newPeerIp))
                         {
-                            _piecesByPeer[newPeerIp] = [];
-                            Console.WriteLine($"Iniciando download de peças do novo peer {newPeerIp}");
-                            // Chamar download de peer a partir daqui
+                            new Thread(() =>
+                            {
+                                List<string> missingPieces;
+                                lock (myPiecesLock)
+                                {
+                                    missingPieces = Enumerable.Range(1, _fileLength)
+                                        .Select(i => i.ToString())
+                                        .Where(piece => !_myPieces.Contains(piece))
+                                        .ToList();
+                                }
+
+                                foreach (var piece in missingPieces)
+                                {
+                                    bool deveBaixar = false;
+                                    lock (myPiecesLock)
+                                    {
+                                        if (!_myPieces.Contains(piece))
+                                        {
+                                            _myPieces.Add(piece); 
+                                            deveBaixar = true;
+                                        }
+                                    }
+                                    if (deveBaixar)
+                                        RequestPieceFromPeer(newPeerIp, piece);
+                                }
+                            }).Start();
                         }
                     }
                 }
