@@ -26,12 +26,11 @@ try
     var peerIps = SendJoinRequest();
     StartPeerServer();
 
-    // Envia periodicamente ao tracker as peças que possui
     new Thread(() =>
     {
         while (true)
         {
-            Thread.Sleep(3000); // 3 segundos
+            Thread.Sleep(3000);
             SendHavePiece(_myPieces);
         }
     })
@@ -48,11 +47,10 @@ try
     }
     if (!_amISeeder)
     {
-        FirstConnection();
+        new Thread(() => FirstConnection()) { IsBackground = true }.Start();
     }
-
-    StartNotificationServer();
     NotifyPeersAboutJoin(peerIps, localPort);
+    StartNotificationServer();
 }
 catch (Exception ex)
 {
@@ -359,7 +357,7 @@ void StartNotificationServer()
 
                     lock (_piecesByPeer)
                     {
-                        if (_piecesByPeer.Count < 2 && !_piecesByPeer.ContainsKey(newPeerIp))
+                        if (_piecesByPeer.Count < 4 && !_piecesByPeer.ContainsKey(newPeerIp))
                         {
                             _piecesByPeer[newPeerIp] = pieces;
                             var teste = Task.Run(() =>
