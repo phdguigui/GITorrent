@@ -25,8 +25,6 @@ try
 
     var peerIps = SendJoinRequest();
     StartPeerServer();
-    StartNotificationServer();
-    NotifyPeersAboutJoin(peerIps, localPort);
 
     // Envia periodicamente ao tracker as peças que possui
     new Thread(() =>
@@ -52,6 +50,9 @@ try
     {
         FirstConnection();
     }
+
+    StartNotificationServer();
+    NotifyPeersAboutJoin(peerIps, localPort);
 }
 catch (Exception ex)
 {
@@ -353,7 +354,6 @@ void StartNotificationServer()
                     List<string> pieces = parts.Length > 2 && !string.IsNullOrWhiteSpace(parts[2])
                         ? parts[2].Split(',').ToList()
                         : new();
-                    _piecesByPeer[newPeerIp] = pieces;
 
                     Console.WriteLine($"{DateTime.Now:dd/MM/yyyy HH:mm:ss} | ({newPeerIp}): Novo peer entrou na rede");
 
@@ -361,6 +361,7 @@ void StartNotificationServer()
                     {
                         if (_piecesByPeer.Count < 2 && !_piecesByPeer.ContainsKey(newPeerIp))
                         {
+                            _piecesByPeer[newPeerIp] = pieces;
                             var teste = Task.Run(() =>
                             {
                                 List<string> missingPieces;
