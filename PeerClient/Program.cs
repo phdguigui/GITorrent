@@ -9,7 +9,6 @@ Dictionary<string, List<string>> _piecesByPeer = new();
 Dictionary<string, List<string>> _peersByPiece = new();
 List<string> _myPieces = new();
 bool _amIFirst = false;
-int _fileLength = 0;
 object myPiecesLock = new();
 
 UdpClient udpClient = new(0);
@@ -26,21 +25,7 @@ try
     var peerIps = SendJoinRequest();
     StartPeerServer();
 
-    new Thread(() =>
-    {
-        while (true)
-        {
-            Thread.Sleep(3000);
-            SendHavePiece(_myPieces);
-        }
-    })
-    { IsBackground = true }.Start();
-
     var initialPieces = VerifyPieces();
-    if (_amIFirst || initialPieces.Count == _fileLength)
-    {
-        _amIFirst = true;
-    }
     if (initialPieces.Count > 0)
     {
         SendHavePiece(initialPieces);
@@ -50,6 +35,7 @@ try
         new Thread(() => FirstConnection()) { IsBackground = true }.Start();
     }
 
+    StartHavePieceUpdater();
     StartPeerUpdater();
 }
 catch (Exception ex)
@@ -100,8 +86,6 @@ List<string> SendJoinRequest()
                 hasPiece ? peer.Split("[")[1].Split(",").Select(x => x.Replace("]", "")).ToList() : new());
             peerIps.Add(ip);
         }
-
-        _fileLength = int.Parse(peersAndPieces.Split("SIZE")[1]);
     }
     return peerIps;
 }
@@ -109,7 +93,7 @@ List<string> SendJoinRequest()
 void SendHavePiece(List<string> pieces)
 {
     _myPieces = pieces;
-    var message = $"HAVE_PIECE{(_amIFirst ? "_SEEDER" : "")}|{string.Join(",", pieces)}";
+    var message = $"HAVE_PIECE|{string.Join(",", pieces)}";
     SendMessageTracker(message);
 }
 
@@ -340,6 +324,19 @@ void StartPeerUpdater()
                 Console.WriteLine($"{DateTime.Now:dd/MM/yyyy HH:mm:ss} | (Interno): Erro ao atualizar peers do tracker: {ex.Message}");
             }
             Thread.Sleep(1000); // 1 segundo
+        }
+    })
+    { IsBackground = true }.Start();
+}
+
+void StartHavePieceUpdater()
+{
+    new Thread(() =>
+    {
+        while (true)
+        {
+            Thread.Sleep(3000);
+            SendHavePiece(_myPieces);
         }
     })
     { IsBackground = true }.Start();

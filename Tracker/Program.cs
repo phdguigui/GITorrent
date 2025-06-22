@@ -6,7 +6,6 @@ using System.Text;
 UdpClient _udpServer = new(5000);
 Dictionary<string, List<string>> _peerList = [];
 string _clientAddress = string.Empty;
-int _fileLength = 0;
 
 IPEndPoint remoteEP = new IPEndPoint(IPAddress.Any, 0);
 Console.WriteLine($"Tracker iniciado no endereço: {GetCurrentIP()}:5000\n");
@@ -16,17 +15,21 @@ while (true)
     byte[] data = _udpServer.Receive(ref remoteEP);
     string message = Encoding.UTF8.GetString(data);
     _clientAddress = $"{remoteEP.Address}";
-    //Console.WriteLine($"Recebido de {_clientAddress} # {message}\n");
 
     if (message == "JOIN_REQUEST")
     {
         Console.WriteLine($"{DateTime.Now:dd/MM/yyyy HH:mm:ss} | <= ({_clientAddress}): {message}");
         JoinRequestHandler();
     }
-    if (message.StartsWith("HAVE_PIECE"))
+    else if (message.StartsWith("HAVE_PIECE"))
     {
         Console.WriteLine($"{DateTime.Now:dd/MM/yyyy HH:mm:ss} | <= ({_clientAddress}): Atualização de peças");
         HavePieceHandler(message);
+    }
+    else if (message == "GET_PEERS")
+    {
+        //Console.WriteLine($"{DateTime.Now:dd/MM/yyyy HH:mm:ss} | <= ({_clientAddress}): {message}");
+        GetPeersHandler();
     }
 }
 
@@ -39,32 +42,40 @@ void JoinRequestHandler()
         _peerList[peerAddress] = [];
     }
 
+    // Monta resposta excluindo o próprio peer
+    string response = BuildPeersResponse(excludePeer: peerAddress);
+    byte[] responseData = Encoding.UTF8.GetBytes(response);
+    _udpServer.Send(responseData, responseData.Length, remoteEP);
+    Console.WriteLine($"{DateTime.Now:dd/MM/yyyy HH:mm:ss} | => ({peerAddress}): Lista de peers e respectivos pedaços (Join Request)");
+}
+
+void GetPeersHandler()
+{
+    string peerAddress = $"{remoteEP.Address}";
+    string response = BuildPeersResponse(excludePeer: null);
+    byte[] responseData = Encoding.UTF8.GetBytes(response);
+    _udpServer.Send(responseData, responseData.Length, remoteEP);
+    Console.WriteLine($"{DateTime.Now:dd/MM/yyyy HH:mm:ss} | => ({peerAddress}): Lista atualizada de peers e respectivos pedaços");
+}
+
+string BuildPeersResponse(string? excludePeer)
+{
     StringBuilder responseBuilder = new("PEER_LIST|");
     foreach (var peer in _peerList)
     {
-        if(peer.Key != $"{remoteEP.Address}")
+        if (excludePeer == null || peer.Key != excludePeer)
         {
             string pieces = string.Join(",", peer.Value);
             responseBuilder.Append($"{peer.Key}[{pieces}];");
         }
     }
-
     var response = responseBuilder.ToString() == "PEER_LIST|" ? "PEER_LIST|NONE" : responseBuilder.ToString();
-    response += _fileLength == 0 ? "" : $" SIZE{_fileLength}";
-
-    byte[] responseData = Encoding.UTF8.GetBytes(response.ToString());
-    _udpServer.Send(responseData, responseData.Length, remoteEP);
-    //Console.WriteLine($"Enviado para {peerAddress}: {response}\n");
-    Console.WriteLine($"{DateTime.Now:dd/MM/yyyy HH:mm:ss} | => ({peerAddress}): Lista de peers e respectivos pedaços");
+    return response;
 }
 
 void HavePieceHandler(string message)
 {
     _peerList[_clientAddress] = message.Split("|")[1].Split(",").ToList();
-    if (message.Contains("SEEDER"))
-    {
-        _fileLength = _peerList[_clientAddress].Count;
-    }
 }
 
 #region Helpers
