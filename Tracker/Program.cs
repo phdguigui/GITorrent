@@ -5,10 +5,29 @@ using System.Text;
 
 UdpClient _udpServer = new(5000);
 Dictionary<string, List<string>> _peerList = [];
+Dictionary<string, DateTime> _lastSeen = new();
 string _clientAddress = string.Empty;
 
 IPEndPoint remoteEP = new IPEndPoint(IPAddress.Any, 0);
 Console.WriteLine($"Tracker iniciado no endereço: {GetCurrentIP()}:5000\n");
+
+// Thread de limpeza de peers inativos
+new Thread(() =>
+{
+    while (true)
+    {
+        Thread.Sleep(1000);
+        var now = DateTime.Now;
+        var toRemove = _lastSeen.Where(kv => (now - kv.Value).TotalSeconds > 5).Select(kv => kv.Key).ToList();
+        foreach (var peer in toRemove)
+        {
+            _peerList.Remove(peer);
+            _lastSeen.Remove(peer);
+            Console.WriteLine($"{DateTime.Now:dd/MM/yyyy HH:mm:ss} | (Tracker): Removido peer inativo: {peer}");
+        }
+    }
+})
+{ IsBackground = true }.Start();
 
 while (true)
 {
@@ -28,7 +47,11 @@ while (true)
     }
     else if (message == "GET_PEERS")
     {
-        //Console.WriteLine($"{DateTime.Now:dd/MM/yyyy HH:mm:ss} | <= ({_clientAddress}): {message}");
+        // Atualiza o tempo do peer
+        lock (_lastSeen)
+        {
+            _lastSeen[_clientAddress] = DateTime.Now;
+        }
         GetPeersHandler();
     }
 }
@@ -41,8 +64,11 @@ void JoinRequestHandler()
     {
         _peerList[peerAddress] = [];
     }
+    lock (_lastSeen)
+    {
+        _lastSeen[peerAddress] = DateTime.Now;
+    }
 
-    // Monta resposta excluindo o próprio peer
     string response = BuildPeersResponse(excludePeer: peerAddress);
     byte[] responseData = Encoding.UTF8.GetBytes(response);
     _udpServer.Send(responseData, responseData.Length, remoteEP);
@@ -52,6 +78,10 @@ void JoinRequestHandler()
 void GetPeersHandler()
 {
     string peerAddress = $"{remoteEP.Address}";
+    lock (_lastSeen)
+    {
+        _lastSeen[peerAddress] = DateTime.Now;
+    }
     string response = BuildPeersResponse(excludePeer: null);
     byte[] responseData = Encoding.UTF8.GetBytes(response);
     _udpServer.Send(responseData, responseData.Length, remoteEP);
@@ -76,6 +106,10 @@ string BuildPeersResponse(string? excludePeer)
 void HavePieceHandler(string message)
 {
     _peerList[_clientAddress] = message.Split("|")[1].Split(",").ToList();
+    lock (_lastSeen)
+    {
+        _lastSeen[_clientAddress] = DateTime.Now;
+    }
 }
 
 #region Helpers
