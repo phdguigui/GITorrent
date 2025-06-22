@@ -28,7 +28,7 @@ try
     var initialPieces = VerifyPieces();
     if (initialPieces.Count > 0)
     {
-        SendHavePiece(initialPieces);
+        SendHavePiece();
     }
     if (!_amIFirst)
     {
@@ -90,9 +90,13 @@ List<string> SendJoinRequest()
     return peerIps;
 }
 
-void SendHavePiece(List<string> pieces)
+void SendHavePiece()
 {
-    _myPieces = pieces;
+    var pieces = VerifyPieces();
+    lock (myPiecesLock)
+    {
+        _myPieces = pieces;
+    }
     var message = $"HAVE_PIECE|{string.Join(",", pieces)}";
     SendMessageTracker(message);
 }
@@ -336,7 +340,7 @@ void StartHavePieceUpdater()
         while (true)
         {
             Thread.Sleep(3000);
-            SendHavePiece(_myPieces);
+            SendHavePiece();
         }
     })
     { IsBackground = true }.Start();
