@@ -10,6 +10,8 @@ Dictionary<string, List<string>> _peersByPiece = new();
 List<string> _myPieces = new();
 bool _amIFirst = false;
 object myPiecesLock = new();
+HashSet<string> _downloadingPieces = new();
+object downloadingPiecesLock = new();
 
 UdpClient udpClient = new(0);
 
@@ -132,14 +134,13 @@ void FirstConnection()
 
 void RarestFirst()
 {
+    _peersByPiece.Clear();
     foreach (var peer in _piecesByPeer)
     {
         foreach (var piece in peer.Value)
         {
             if (!_peersByPiece.ContainsKey(piece))
-            {
                 _peersByPiece[piece] = new List<string>();
-            }
             _peersByPiece[piece].Add(peer.Key);
         }
     }
@@ -147,70 +148,47 @@ void RarestFirst()
     var missingPieces = _peersByPiece
         .Where(p => !_myPieces.Contains(p.Key))
         .OrderBy(p => p.Value.Count)
+        .Select(p => p.Key)
         .ToList();
 
-    if (missingPieces.Count == 0)
-        return;
-
-    var random = new Random();
-
-    var piecesForFirstPeer = new List<(string piece, string peerIp)>();
-    var piecesForRandomPeer = new List<(string piece, string peerIp)>();
-
-    foreach (var pieceEntry in missingPieces)
+    var pieceRequestsByPeer = new Dictionary<string, List<string>>();
+    foreach (var piece in missingPieces)
     {
-        string piece = pieceEntry.Key;
-        var peers = pieceEntry.Value;
-
-        var firstPeer = peers.FirstOrDefault();
-        if (firstPeer != null)
-            piecesForFirstPeer.Add((piece, firstPeer));
-
-        var randomPeers = peers.Where(p => p != firstPeer).ToList();
-        if (randomPeers.Count > 0)
+        foreach (var peerIp in _peersByPiece[piece])
         {
-            var randomPeer = randomPeers[random.Next(randomPeers.Count)];
-            piecesForRandomPeer.Add((piece, randomPeer));
+            if (!pieceRequestsByPeer.ContainsKey(peerIp))
+                pieceRequestsByPeer[peerIp] = new List<string>();
+            pieceRequestsByPeer[peerIp].Add(piece);
         }
     }
 
-    var task1 = Task.Run(() =>
+    var tasks = new List<Task>();
+    foreach (var kvp in pieceRequestsByPeer)
     {
-        foreach (var (piece, peerIp) in piecesForFirstPeer)
+        var peerIp = kvp.Key;
+        var pieces = kvp.Value.Distinct().ToList();
+        tasks.Add(Task.Run(() =>
         {
-            bool deveBaixar = false;
-            lock (myPiecesLock)
+            foreach (var piece in pieces)
             {
-                if (!_myPieces.Contains(piece))
+                bool deveBaixar = false;
+                lock (downloadingPiecesLock)
                 {
-                    _myPieces.Add(piece);
-                    deveBaixar = true;
+                    lock (myPiecesLock)
+                    {
+                        if (!_myPieces.Contains(piece) && !_downloadingPieces.Contains(piece))
+                        {
+                            _downloadingPieces.Add(piece);
+                            deveBaixar = true;
+                        }
+                    }
                 }
+                if (deveBaixar)
+                    RequestPieceFromPeer(peerIp, piece);
             }
-            if (deveBaixar)
-                RequestPieceFromPeer(peerIp, piece);
-        }
-    });
-
-    var task2 = Task.Run(() =>
-    {
-        foreach (var (piece, peerIp) in piecesForRandomPeer)
-        {
-            bool deveBaixar = false;
-            lock (myPiecesLock)
-            {
-                if (!_myPieces.Contains(piece))
-                {
-                    _myPieces.Add(piece);
-                    deveBaixar = true;
-                }
-            }
-            if (deveBaixar)
-                RequestPieceFromPeer(peerIp, piece);
-        }
-    });
-
-    Task.WaitAll(task1, task2);
+        }));
+    }
+    Task.WaitAll(tasks.ToArray());
 }
 
 void RequestPieceFromPeer(string peerIp, string piece)
@@ -234,7 +212,6 @@ void RequestPieceFromPeer(string peerIp, string piece)
             ms.Write(buffer, 0, bytesRead);
         }
 
-        // Verifica se recebeu "PIECE_NOT_FOUND"
         var receivedData = ms.ToArray();
         string message = Encoding.UTF8.GetString(receivedData);
 
@@ -244,7 +221,6 @@ void RequestPieceFromPeer(string peerIp, string piece)
             return;
         }
 
-        // Salva o arquivo e adiciona à lista somente se não recebeu "PIECE_NOT_FOUND"
         string filePath = Path.Combine(folderPath, piece + ".txt");
         File.WriteAllBytes(filePath, receivedData);
         Console.WriteLine($"{DateTime.Now:dd/MM/yyyy HH:mm:ss} | <= ({peerIp}): Peça '{piece}' recebida");
@@ -258,6 +234,13 @@ void RequestPieceFromPeer(string peerIp, string piece)
     catch (Exception ex)
     {
         Console.WriteLine($"{DateTime.Now:dd/MM/yyyy HH:mm:ss} | <= ({peerIp}): Erro ao requisitar peça '{piece}': {ex.Message}");
+    }
+    finally
+    {
+        lock (downloadingPiecesLock)
+        {
+            _downloadingPieces.Remove(piece);
+        }
     }
 }
 
@@ -398,7 +381,6 @@ void RequestMissingPieces()
     Dictionary<string, List<string>> currentPeersByPiece;
     lock (_peersByPiece)
     {
-        // Copia para evitar race condition
         currentPeersByPiece = _peersByPiece.ToDictionary(
             entry => entry.Key,
             entry => entry.Value.ToList()
@@ -414,19 +396,28 @@ void RequestMissingPieces()
         var tasks = new List<Task>();
         foreach (var piece in missingPieces)
         {
+            bool deveBaixar = false;
+            lock (downloadingPiecesLock)
+            {
+                lock (myPiecesLock)
+                {
+                    if (!_myPieces.Contains(piece) && !_downloadingPieces.Contains(piece))
+                    {
+                        _downloadingPieces.Add(piece);
+                        deveBaixar = true;
+                    }
+                }
+            }
+            if (!deveBaixar)
+                continue;
+
             var peerIps = currentPeersByPiece[piece];
             if (peerIps == null || peerIps.Count == 0)
                 continue;
 
-            // Sorteia um peer disponível para cada peça
             var chosenPeer = peerIps[new Random().Next(peerIps.Count)];
             tasks.Add(Task.Run(() =>
             {
-                lock (myPiecesLock)
-                {
-                    if (_myPieces.Contains(piece))
-                        return;
-                }
                 RequestPieceFromPeer(chosenPeer, piece);
             }));
         }
