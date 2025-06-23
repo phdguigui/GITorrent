@@ -34,7 +34,7 @@ try
     }
     if (!_amIFirst)
     {
-        new Thread(() => FirstConnection()) { IsBackground = true }.Start();
+        FirstConnection();
     }
 
     StartHavePieceUpdater();
@@ -129,11 +129,7 @@ string ListenMessageTracker(IPEndPoint trackerEndPoint)
 
 void FirstConnection()
 {
-    // Baixa as peças mais raras primeiro, na thread principal
     RarestFirst();
-
-    // Depois, inicia o download paralelo das demais peças
-    new Thread(() => RequestMissingPieces()).Start();
 }
 
 void RarestFirst()
