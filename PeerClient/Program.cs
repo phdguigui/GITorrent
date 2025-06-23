@@ -147,48 +147,72 @@ void RarestFirst()
 
     var missingPieces = _peersByPiece
         .Where(p => !_myPieces.Contains(p.Key))
-        .OrderBy(p => p.Value.Count)
+        .ToList();
+
+    if (missingPieces.Count == 0)
+        return;
+
+    // 1. Descobre a menor raridade
+    int minRarity = missingPieces.Min(p => p.Value.Count);
+
+    // 2. Peças mais raras (todas as que têm minRarity)
+    var rarestPieces = missingPieces
+        .Where(p => p.Value.Count == minRarity)
         .Select(p => p.Key)
         .ToList();
 
-    var pieceRequestsByPeer = new Dictionary<string, List<string>>();
-    foreach (var piece in missingPieces)
+    // 3. Baixa as peças mais raras PRIMEIRO (simultaneamente, se quiser)
+    var rareTasks = new List<Task>();
+    foreach (var piece in rarestPieces)
     {
-        foreach (var peerIp in _peersByPiece[piece])
+        bool deveBaixar = false;
+        lock (downloadingPiecesLock)
         {
-            if (!pieceRequestsByPeer.ContainsKey(peerIp))
-                pieceRequestsByPeer[peerIp] = new List<string>();
-            pieceRequestsByPeer[peerIp].Add(piece);
-        }
-    }
-
-    var tasks = new List<Task>();
-    foreach (var kvp in pieceRequestsByPeer)
-    {
-        var peerIp = kvp.Key;
-        var pieces = kvp.Value.Distinct().ToList();
-        tasks.Add(Task.Run(() =>
-        {
-            foreach (var piece in pieces)
+            lock (myPiecesLock)
             {
-                bool deveBaixar = false;
-                lock (downloadingPiecesLock)
+                if (!_myPieces.Contains(piece) && !_downloadingPieces.Contains(piece))
                 {
-                    lock (myPiecesLock)
-                    {
-                        if (!_myPieces.Contains(piece) && !_downloadingPieces.Contains(piece))
-                        {
-                            _downloadingPieces.Add(piece);
-                            deveBaixar = true;
-                        }
-                    }
+                    _downloadingPieces.Add(piece);
+                    deveBaixar = true;
                 }
-                if (deveBaixar)
-                    RequestPieceFromPeer(peerIp, piece);
             }
-        }));
+        }
+        if (!deveBaixar) continue;
+
+        var peers = _peersByPiece[piece];
+        if (peers == null || peers.Count == 0)
+            continue;
+        var chosenPeer = peers[new Random().Next(peers.Count)];
+        rareTasks.Add(Task.Run(() => RequestPieceFromPeer(chosenPeer, piece)));
     }
-    Task.WaitAll(tasks.ToArray());
+    Task.WaitAll(rareTasks.ToArray());
+
+    // 4. Baixa o restante das peças paralelamente
+    var otherPieces = missingPieces.Select(p => p.Key).Except(rarestPieces).ToList();
+    var otherTasks = new List<Task>();
+    foreach (var piece in otherPieces)
+    {
+        bool deveBaixar = false;
+        lock (downloadingPiecesLock)
+        {
+            lock (myPiecesLock)
+            {
+                if (!_myPieces.Contains(piece) && !_downloadingPieces.Contains(piece))
+                {
+                    _downloadingPieces.Add(piece);
+                    deveBaixar = true;
+                }
+            }
+        }
+        if (!deveBaixar) continue;
+
+        var peers = _peersByPiece[piece];
+        if (peers == null || peers.Count == 0)
+            continue;
+        var chosenPeer = peers[new Random().Next(peers.Count)];
+        otherTasks.Add(Task.Run(() => RequestPieceFromPeer(chosenPeer, piece)));
+    }
+    Task.WaitAll(otherTasks.ToArray());
 }
 
 void RequestPieceFromPeer(string peerIp, string piece)
@@ -254,6 +278,7 @@ void StartPeerServer()
 
         while (true)
         {
+            continue;
             try
             {
                 using TcpClient client = listener.AcceptTcpClient();
