@@ -129,7 +129,11 @@ string ListenMessageTracker(IPEndPoint trackerEndPoint)
 
 void FirstConnection()
 {
+    // Baixa as peças mais raras primeiro, na thread principal
     RarestFirst();
+
+    // Depois, inicia o download paralelo das demais peças
+    new Thread(() => RequestMissingPieces()).Start();
 }
 
 void RarestFirst()
@@ -152,17 +156,13 @@ void RarestFirst()
     if (missingPieces.Count == 0)
         return;
 
-    // 1. Descobre a menor raridade
     int minRarity = missingPieces.Min(p => p.Value.Count);
 
-    // 2. Peças mais raras (todas as que têm minRarity)
     var rarestPieces = missingPieces
         .Where(p => p.Value.Count == minRarity)
         .Select(p => p.Key)
         .ToList();
 
-    // 3. Baixa as peças mais raras PRIMEIRO (simultaneamente, se quiser)
-    var rareTasks = new List<Task>();
     foreach (var piece in rarestPieces)
     {
         bool deveBaixar = false;
@@ -183,39 +183,13 @@ void RarestFirst()
         if (peers == null || peers.Count == 0)
             continue;
         var chosenPeer = peers[new Random().Next(peers.Count)];
-        rareTasks.Add(Task.Run(() => RequestPieceFromPeer(chosenPeer, piece)));
-    }
-    Task.WaitAll(rareTasks.ToArray());
 
-    // 4. Baixa o restante das peças paralelamente
-    var otherPieces = missingPieces.Select(p => p.Key).Except(rarestPieces).ToList();
-    var otherTasks = new List<Task>();
-    foreach (var piece in otherPieces)
-    {
-        bool deveBaixar = false;
-        lock (downloadingPiecesLock)
-        {
-            lock (myPiecesLock)
-            {
-                if (!_myPieces.Contains(piece) && !_downloadingPieces.Contains(piece))
-                {
-                    _downloadingPieces.Add(piece);
-                    deveBaixar = true;
-                }
-            }
-        }
-        if (!deveBaixar) continue;
-
-        var peers = _peersByPiece[piece];
-        if (peers == null || peers.Count == 0)
-            continue;
-        var chosenPeer = peers[new Random().Next(peers.Count)];
-        otherTasks.Add(Task.Run(() => RequestPieceFromPeer(chosenPeer, piece)));
+        // Download síncrono, aguarda terminar antes de pegar o próximo rarest
+        RequestPieceFromPeer(chosenPeer, piece, true);
     }
-    Task.WaitAll(otherTasks.ToArray());
 }
 
-void RequestPieceFromPeer(string peerIp, string piece)
+void RequestPieceFromPeer(string peerIp, string piece, bool firstPiece)
 {
     try
     {
@@ -226,7 +200,9 @@ void RequestPieceFromPeer(string peerIp, string piece)
         byte[] requestBytes = Encoding.UTF8.GetBytes(piece);
         stream.Write(requestBytes, 0, requestBytes.Length);
 
-        Console.WriteLine($"{DateTime.Now:dd/MM/yyyy HH:mm:ss} | => ({peerIp}): Peça '{piece}' solicitada");
+        string firstPieceAppend = firstPiece ? "(First Piece)" : "";
+
+        Console.WriteLine($"{DateTime.Now:dd/MM/yyyy HH:mm:ss} | => ({peerIp}): Peça '{piece}' solicitada {firstPieceAppend}");
 
         using MemoryStream ms = new();
         byte[] buffer = new byte[4096];
@@ -278,7 +254,6 @@ void StartPeerServer()
 
         while (true)
         {
-            continue;
             try
             {
                 using TcpClient client = listener.AcceptTcpClient();
@@ -443,7 +418,7 @@ void RequestMissingPieces()
             var chosenPeer = peerIps[new Random().Next(peerIps.Count)];
             tasks.Add(Task.Run(() =>
             {
-                RequestPieceFromPeer(chosenPeer, piece);
+                RequestPieceFromPeer(chosenPeer, piece, false);
             }));
         }
         Task.WaitAll(tasks.ToArray());
