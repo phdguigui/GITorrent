@@ -154,35 +154,27 @@ void RarestFirst()
 
     int minRarity = missingPieces.Min(p => p.Value.Count);
 
-    var rarestPieces = missingPieces
+    var rarestPiece = missingPieces
         .Where(p => p.Value.Count == minRarity)
         .Select(p => p.Key)
-        .ToList();
+        .FirstOrDefault();
 
-    foreach (var piece in rarestPieces)
+    lock (downloadingPiecesLock)
     {
-        bool deveBaixar = false;
-        lock (downloadingPiecesLock)
+        lock (myPiecesLock)
         {
-            lock (myPiecesLock)
+            if (!_myPieces.Contains(rarestPiece) && !_downloadingPieces.Contains(rarestPiece))
             {
-                if (!_myPieces.Contains(piece) && !_downloadingPieces.Contains(piece))
-                {
-                    _downloadingPieces.Add(piece);
-                    deveBaixar = true;
-                }
+                _downloadingPieces.Add(rarestPiece);
             }
         }
-        if (!deveBaixar) continue;
-
-        var peers = _peersByPiece[piece];
-        if (peers == null || peers.Count == 0)
-            continue;
-        var chosenPeer = peers[new Random().Next(peers.Count)];
-
-        // Download síncrono, aguarda terminar antes de pegar o próximo rarest
-        RequestPieceFromPeer(chosenPeer, piece, true);
     }
+
+    var peers = _peersByPiece[rarestPiece];
+    var chosenPeer = peers[new Random().Next(peers.Count)];
+
+    // Download síncrono, aguarda terminar antes de pegar o próximo rarest
+    RequestPieceFromPeer(chosenPeer, rarestPiece, true);
 }
 
 void RequestPieceFromPeer(string peerIp, string piece, bool firstPiece)
