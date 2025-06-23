@@ -8,9 +8,10 @@ string folderPath = @"C:\TorrentPieces";
 Dictionary<string, List<string>> _piecesByPeer = new();
 Dictionary<string, List<string>> _peersByPiece = new();
 List<string> _myPieces = new();
-bool _amISeeder = false;
-int _fileLength = 0;
+bool _amIFirst = false;
 object myPiecesLock = new();
+HashSet<string> _downloadingPieces = new();
+object downloadingPiecesLock = new();
 
 UdpClient udpClient = new(0);
 
@@ -26,31 +27,18 @@ try
     var peerIps = SendJoinRequest();
     StartPeerServer();
 
-    new Thread(() =>
-    {
-        while (true)
-        {
-            Thread.Sleep(3000);
-            SendHavePiece(_myPieces);
-        }
-    })
-    { IsBackground = true }.Start();
-
     var initialPieces = VerifyPieces();
-    if (_amISeeder || initialPieces.Count == _fileLength)
-    {
-        _amISeeder = true;
-    }
     if (initialPieces.Count > 0)
     {
-        SendHavePiece(initialPieces);
+        SendHavePiece();
     }
-    if (!_amISeeder)
+    if (!_amIFirst)
     {
-        new Thread(() => FirstConnection()) { IsBackground = true }.Start();
+        FirstConnection();
     }
-    NotifyPeersAboutJoin(peerIps, localPort);
-    StartNotificationServer();
+
+    StartHavePieceUpdater();
+    StartPeerUpdater();
 }
 catch (Exception ex)
 {
@@ -83,11 +71,11 @@ List<string> SendJoinRequest()
     var trackerEndpoint = SendMessageTracker("JOIN_REQUEST");
     var peersAndPieces = ListenMessageTracker(trackerEndpoint);
 
-    _amISeeder = peersAndPieces.Split("|")[1].ToString() == "NONE";
+    _amIFirst = peersAndPieces.Split("|")[1].ToString() == "NONE";
 
     var peerIps = new List<string>();
 
-    if (!_amISeeder)
+    if (!_amIFirst)
     {
         var piersAndPiecesFormatted = peersAndPieces.Split("|")[1].Split(" ")[0].Remove(peersAndPieces.Split("|")[1].Split(" ")[0].Length - 1).Split(";");
 
@@ -100,16 +88,18 @@ List<string> SendJoinRequest()
                 hasPiece ? peer.Split("[")[1].Split(",").Select(x => x.Replace("]", "")).ToList() : new());
             peerIps.Add(ip);
         }
-
-        _fileLength = int.Parse(peersAndPieces.Split("SIZE")[1]);
     }
     return peerIps;
 }
 
-void SendHavePiece(List<string> pieces)
+void SendHavePiece()
 {
-    _myPieces = pieces;
-    var message = $"HAVE_PIECE{(_amISeeder ? "_SEEDER" : "")}|{string.Join(",", pieces)}";
+    var pieces = VerifyPieces();
+    lock (myPiecesLock)
+    {
+        _myPieces = pieces;
+    }
+    var message = $"HAVE_PIECE|{string.Join(",", pieces)}";
     SendMessageTracker(message);
 }
 
@@ -144,88 +134,50 @@ void FirstConnection()
 
 void RarestFirst()
 {
+    _peersByPiece.Clear();
     foreach (var peer in _piecesByPeer)
     {
         foreach (var piece in peer.Value)
         {
             if (!_peersByPiece.ContainsKey(piece))
-            {
                 _peersByPiece[piece] = new List<string>();
-            }
             _peersByPiece[piece].Add(peer.Key);
         }
     }
 
     var missingPieces = _peersByPiece
         .Where(p => !_myPieces.Contains(p.Key))
-        .OrderBy(p => p.Value.Count)
         .ToList();
 
     if (missingPieces.Count == 0)
         return;
 
-    var random = new Random();
+    int minRarity = missingPieces.Min(p => p.Value.Count);
 
-    var piecesForFirstPeer = new List<(string piece, string peerIp)>();
-    var piecesForRandomPeer = new List<(string piece, string peerIp)>();
+    var rarestPiece = missingPieces
+        .Where(p => p.Value.Count == minRarity)
+        .Select(p => p.Key)
+        .FirstOrDefault();
 
-    foreach (var pieceEntry in missingPieces)
+    lock (downloadingPiecesLock)
     {
-        string piece = pieceEntry.Key;
-        var peers = pieceEntry.Value;
-
-        var firstPeer = peers.FirstOrDefault();
-        if (firstPeer != null)
-            piecesForFirstPeer.Add((piece, firstPeer));
-
-        var randomPeers = peers.Where(p => p != firstPeer).ToList();
-        if (randomPeers.Count > 0)
+        lock (myPiecesLock)
         {
-            var randomPeer = randomPeers[random.Next(randomPeers.Count)];
-            piecesForRandomPeer.Add((piece, randomPeer));
+            if (!_myPieces.Contains(rarestPiece) && !_downloadingPieces.Contains(rarestPiece))
+            {
+                _downloadingPieces.Add(rarestPiece);
+            }
         }
     }
 
-    var task1 = Task.Run(() =>
-    {
-        foreach (var (piece, peerIp) in piecesForFirstPeer)
-        {
-            bool deveBaixar = false;
-            lock (myPiecesLock)
-            {
-                if (!_myPieces.Contains(piece))
-                {
-                    _myPieces.Add(piece);
-                    deveBaixar = true;
-                }
-            }
-            if (deveBaixar)
-                RequestPieceFromPeer(peerIp, piece);
-        }
-    });
+    var peers = _peersByPiece[rarestPiece];
+    var chosenPeer = peers[new Random().Next(peers.Count)];
 
-    var task2 = Task.Run(() =>
-    {
-        foreach (var (piece, peerIp) in piecesForRandomPeer)
-        {
-            bool deveBaixar = false;
-            lock (myPiecesLock)
-            {
-                if (!_myPieces.Contains(piece))
-                {
-                    _myPieces.Add(piece);
-                    deveBaixar = true;
-                }
-            }
-            if (deveBaixar)
-                RequestPieceFromPeer(peerIp, piece);
-        }
-    });
-
-    Task.WaitAll(task1, task2);
+    // Download síncrono, aguarda terminar antes de pegar o próximo rarest
+    RequestPieceFromPeer(chosenPeer, rarestPiece, true);
 }
 
-void RequestPieceFromPeer(string peerIp, string piece)
+void RequestPieceFromPeer(string peerIp, string piece, bool firstPiece)
 {
     try
     {
@@ -236,7 +188,9 @@ void RequestPieceFromPeer(string peerIp, string piece)
         byte[] requestBytes = Encoding.UTF8.GetBytes(piece);
         stream.Write(requestBytes, 0, requestBytes.Length);
 
-        Console.WriteLine($"{DateTime.Now:dd/MM/yyyy HH:mm:ss} | => ({peerIp}): Peça '{piece}' solicitada");
+        string firstPieceAppend = firstPiece ? "(First Piece)" : "";
+
+        Console.WriteLine($"{DateTime.Now:dd/MM/yyyy HH:mm:ss} | => ({peerIp}): Peça '{piece}' solicitada {firstPieceAppend}");
 
         using MemoryStream ms = new();
         byte[] buffer = new byte[4096];
@@ -246,15 +200,35 @@ void RequestPieceFromPeer(string peerIp, string piece)
             ms.Write(buffer, 0, bytesRead);
         }
 
+        var receivedData = ms.ToArray();
+        string message = Encoding.UTF8.GetString(receivedData);
+
+        if (message == "PIECE_NOT_FOUND")
+        {
+            Console.WriteLine($"{DateTime.Now:dd/MM/yyyy HH:mm:ss} | <= ({peerIp}): Peer não possui a peça '{piece}' (PIECE_NOT_FOUND)");
+            return;
+        }
+
         string filePath = Path.Combine(folderPath, piece + ".txt");
-        File.WriteAllBytes(filePath, ms.ToArray());
+        File.WriteAllBytes(filePath, receivedData);
         Console.WriteLine($"{DateTime.Now:dd/MM/yyyy HH:mm:ss} | <= ({peerIp}): Peça '{piece}' recebida");
 
-        _myPieces.Add(piece);
+        lock (myPiecesLock)
+        {
+            if (!_myPieces.Contains(piece))
+                _myPieces.Add(piece);
+        }
     }
     catch (Exception ex)
     {
         Console.WriteLine($"{DateTime.Now:dd/MM/yyyy HH:mm:ss} | <= ({peerIp}): Erro ao requisitar peça '{piece}': {ex.Message}");
+    }
+    finally
+    {
+        lock (downloadingPiecesLock)
+        {
+            _downloadingPieces.Remove(piece);
+        }
     }
 }
 
@@ -295,7 +269,11 @@ void StartPeerServer()
                 }
                 else
                 {
-                    Console.WriteLine($"{DateTime.Now:dd/MM/yyyy HH:mm:ss} | => ({clientIp}): Peça '{requestedPiece}' requisitada não encontrada");
+                    // Envia "PIECE_NOT_FOUND"
+                    string errorMsg = "PIECE_NOT_FOUND";
+                    byte[] errorBytes = Encoding.UTF8.GetBytes(errorMsg);
+                    stream.Write(errorBytes, 0, errorBytes.Length);
+                    Console.WriteLine($"{DateTime.Now:dd/MM/yyyy HH:mm:ss} | => ({clientIp}): Peça '{requestedPiece}' requisitada não encontrada (PIECE_NOT_FOUND enviado)");
                 }
             }
             catch (Exception ex)
@@ -306,98 +284,133 @@ void StartPeerServer()
     }).Start();
 }
 
-void NotifyPeersAboutJoin(List<string> peerIps, int localPort)
-{
-    foreach (var peerIp in peerIps)
-    {
-        if (peerIp == GetCurrentIP()) continue;
-        try
-        {
-            using TcpClient client = new ();
-            client.Connect(IPAddress.Parse(peerIp), 6001);
-            using NetworkStream stream = client.GetStream();
-            string msg = $"NEW_PEER|{GetCurrentIP()}|{string.Join(",", _myPieces)}";
-            byte[] data = Encoding.UTF8.GetBytes(msg);
-            stream.Write(data, 0, data.Length);
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"{DateTime.Now:dd/MM/yyyy HH:mm:ss} | (Interno): Falha ao notificar peer {peerIp}: {ex.Message}");
-        }
-    }
-}
-
-void StartNotificationServer()
+void StartPeerUpdater()
 {
     new Thread(() =>
     {
-        TcpListener listener = new(IPAddress.Any, 6001);
-        listener.Start();
-        Console.WriteLine("Servidor de notificação iniciado na porta 6001.");
-
         while (true)
         {
             try
             {
-                using TcpClient client = listener.AcceptTcpClient();
-                using NetworkStream stream = client.GetStream();
-                byte[] buffer = new byte[4096];
-                int bytesRead = stream.Read(buffer, 0, buffer.Length);
-                string message = Encoding.UTF8.GetString(buffer, 0, bytesRead);
-
-                if (message.StartsWith("NEW_PEER|"))
-                {
-                    var parts = message.Split('|');
-                    string newPeerIp = parts[1];
-                    List<string> pieces = parts.Length > 2 && !string.IsNullOrWhiteSpace(parts[2])
-                        ? parts[2].Split(',').ToList()
-                        : new();
-
-                    Console.WriteLine($"{DateTime.Now:dd/MM/yyyy HH:mm:ss} | ({newPeerIp}): Novo peer entrou na rede");
-
-                    lock (_piecesByPeer)
-                    {
-                        if (_piecesByPeer.Count < 4 && !_piecesByPeer.ContainsKey(newPeerIp))
-                        {
-                            _piecesByPeer[newPeerIp] = pieces;
-                            var teste = Task.Run(() =>
-                            {
-                                List<string> missingPieces;
-                                lock (myPiecesLock)
-                                {
-                                    missingPieces = Enumerable.Range(1, _fileLength)
-                                        .Select(i => i.ToString())
-                                        .Where(piece => !_myPieces.Contains(piece))
-                                        .ToList();
-                                }
-
-                                foreach (var piece in missingPieces)
-                                {
-                                    bool deveBaixar = false;
-                                    lock (myPiecesLock)
-                                    {
-                                        if (!_myPieces.Contains(piece))
-                                        {
-                                            _myPieces.Add(piece); 
-                                            deveBaixar = true;
-                                        }
-                                    }
-                                    if (deveBaixar)
-                                        RequestPieceFromPeer(newPeerIp, piece);
-                                }
-                            });
-
-                            Task.WaitAll(teste);
-                        }
-                    }
-                }
+                UpdatePeersFromTracker();
             }
             catch (Exception ex)
             {
-                Console.WriteLine("Erro ao receber notificação de novo peer: " + ex.Message);
+                Console.WriteLine($"{DateTime.Now:dd/MM/yyyy HH:mm:ss} | (Interno): Erro ao atualizar peers do tracker: {ex.Message}");
             }
+            Thread.Sleep(1000); // 1 segundo
         }
-    }).Start();
+    })
+    { IsBackground = true }.Start();
+}
+
+void StartHavePieceUpdater()
+{
+    new Thread(() =>
+    {
+        while (true)
+        {
+            Thread.Sleep(3000);
+            SendHavePiece();
+        }
+    })
+    { IsBackground = true }.Start();
+}
+
+void UpdatePeersFromTracker()
+{
+    var trackerEndpoint = SendMessageTracker("GET_PEERS");
+    var peersAndPieces = ListenMessageTracker(trackerEndpoint);
+
+    var tempPiecesByPeer = new Dictionary<string, List<string>>();
+    var tempPeersByPiece = new Dictionary<string, List<string>>();
+
+    var data = peersAndPieces.Split("|");
+    if (data.Length < 2 || data[1] == "NONE")
+        return;
+
+    var piersAndPiecesFormatted = data[1].Split(" ")[0].Remove(data[1].Split(" ")[0].Length - 1).Split(";");
+
+    foreach (var peer in piersAndPiecesFormatted)
+    {
+        var hasPiece = peer.Split("[")[1] != "]";
+        var ip = peer.Split("[")[0];
+        var pieces = hasPiece ? peer.Split("[")[1].Split(",").Select(x => x.Replace("]", "")).ToList() : new List<string>();
+        tempPiecesByPeer[ip] = pieces;
+
+        foreach (var piece in pieces)
+        {
+            if (!tempPeersByPiece.ContainsKey(piece))
+                tempPeersByPiece[piece] = new List<string>();
+            tempPeersByPiece[piece].Add(ip);
+        }
+    }
+
+    lock (_piecesByPeer)
+    {
+        _piecesByPeer.Clear();
+        foreach (var kv in tempPiecesByPeer)
+            _piecesByPeer[kv.Key] = kv.Value;
+    }
+    lock (_peersByPiece)
+    {
+        _peersByPiece.Clear();
+        foreach (var kv in tempPeersByPiece)
+            _peersByPiece[kv.Key] = kv.Value;
+    }
+
+    // Chama a rotina de requisição de peças faltantes
+    RequestMissingPieces();
+}
+
+void RequestMissingPieces()
+{
+    List<string> missingPieces;
+    Dictionary<string, List<string>> currentPeersByPiece;
+    lock (_peersByPiece)
+    {
+        currentPeersByPiece = _peersByPiece.ToDictionary(
+            entry => entry.Key,
+            entry => entry.Value.ToList()
+        );
+    }
+    lock (myPiecesLock)
+    {
+        missingPieces = currentPeersByPiece.Keys.Where(p => !_myPieces.Contains(p)).ToList();
+    }
+
+    if (missingPieces.Count > 0)
+    {
+        var tasks = new List<Task>();
+        foreach (var piece in missingPieces)
+        {
+            bool deveBaixar = false;
+            lock (downloadingPiecesLock)
+            {
+                lock (myPiecesLock)
+                {
+                    if (!_myPieces.Contains(piece) && !_downloadingPieces.Contains(piece))
+                    {
+                        _downloadingPieces.Add(piece);
+                        deveBaixar = true;
+                    }
+                }
+            }
+            if (!deveBaixar)
+                continue;
+
+            var peerIps = currentPeersByPiece[piece];
+            if (peerIps == null || peerIps.Count == 0)
+                continue;
+
+            var chosenPeer = peerIps[new Random().Next(peerIps.Count)];
+            tasks.Add(Task.Run(() =>
+            {
+                RequestPieceFromPeer(chosenPeer, piece, false);
+            }));
+        }
+        Task.WaitAll(tasks.ToArray());
+    }
 }
 
 #region Helpers
