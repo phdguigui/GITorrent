@@ -69,6 +69,9 @@ The system is composed of two main modules: **Tracker** and **PeerClient**.
 
 > ⚠️ **Attention:**  
 > This project is experimental, for educational purposes, and inspired by the BitTorrent protocol.
+---
+
+### Developed by Guilherme Siedschlag and Isabela Pietschmann
 
 ---
 # 🚀 GITorrent - Protocolo P2P Inspirado no BitTorrent (Versão em Português) 🇧🇷
@@ -147,7 +150,3 @@ O sistema é composto por dois módulos principais: **Tracker** e **PeerClient**
 ---
 
 ### Desenvolvido por Guilherme Siedschlag e Isabela Pietschmann
-
----
-
-### Developed by Guilherme Siedschlag and Isabela Pietschmann
