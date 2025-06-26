@@ -21,8 +21,8 @@ try
     int localPort = (udpClient.Client?.LocalEndPoint as IPEndPoint)?.Port ??
         throw new InvalidOperationException("LocalEndPoint ou Port não está definido.");
 
-    Console.WriteLine($"IP local detectado: {localIp}");
-    Console.WriteLine($"Porta local escolhida: {localPort}\n");
+    PeerClientLogger.Log($"IP local detectado: {localIp}");
+    PeerClientLogger.Log($"Porta local escolhida: {localPort}\n");
 
     var peerIps = SendJoinRequest();
     StartPeerServer();
@@ -42,7 +42,7 @@ try
 }
 catch (Exception ex)
 {
-    Console.WriteLine("Erro: " + ex.Message);
+    PeerClientLogger.Log("Erro: " + ex.Message);
 }
 
 List<string> VerifyPieces()
@@ -113,7 +113,7 @@ IPEndPoint SendMessageTracker(string message)
     {
         message = "Atualização de peças";
     }
-    Console.WriteLine($"{DateTime.Now:dd/MM/yyyy HH:mm:ss} | => (Tracker): {message}");
+    PeerClientLogger.Log($"{DateTime.Now:dd/MM/yyyy HH:mm:ss} | => (Tracker): {message}");
 
     return trackerEndPoint;
 }
@@ -122,7 +122,7 @@ string ListenMessageTracker(IPEndPoint trackerEndPoint)
 {
     var response = udpClient.Receive(ref trackerEndPoint);
     string responseMessage = Encoding.UTF8.GetString(response);
-    Console.WriteLine($"{DateTime.Now:dd/MM/yyyy HH:mm:ss} | <= (Tracker): {responseMessage}");
+    PeerClientLogger.Log($"{DateTime.Now:dd/MM/yyyy HH:mm:ss} | <= (Tracker): {responseMessage}");
 
     return responseMessage;
 }
@@ -190,7 +190,7 @@ void RequestPieceFromPeer(string peerIp, string piece, bool firstPiece)
 
         string firstPieceAppend = firstPiece ? "(First Piece)" : "";
 
-        Console.WriteLine($"{DateTime.Now:dd/MM/yyyy HH:mm:ss} | => ({peerIp}): Peça '{piece}' solicitada {firstPieceAppend}");
+        PeerClientLogger.Log($"{DateTime.Now:dd/MM/yyyy HH:mm:ss} | => ({peerIp}:6000): Peça '{piece}' solicitada {firstPieceAppend}");
 
         using MemoryStream ms = new();
         byte[] buffer = new byte[4096];
@@ -205,13 +205,13 @@ void RequestPieceFromPeer(string peerIp, string piece, bool firstPiece)
 
         if (message == "PIECE_NOT_FOUND")
         {
-            Console.WriteLine($"{DateTime.Now:dd/MM/yyyy HH:mm:ss} | <= ({peerIp}): Peer não possui a peça '{piece}' (PIECE_NOT_FOUND)");
+            PeerClientLogger.Log($"{DateTime.Now:dd/MM/yyyy HH:mm:ss} | <= ({peerIp}:6000): Peer não possui a peça '{piece}' (PIECE_NOT_FOUND)");
             return;
         }
 
         string filePath = Path.Combine(folderPath, piece + ".txt");
         File.WriteAllBytes(filePath, receivedData);
-        Console.WriteLine($"{DateTime.Now:dd/MM/yyyy HH:mm:ss} | <= ({peerIp}): Peça '{piece}' recebida");
+        PeerClientLogger.Log($"{DateTime.Now:dd/MM/yyyy HH:mm:ss} | <= ({peerIp}:6000): Peça '{piece}' recebida");
 
         lock (myPiecesLock)
         {
@@ -221,7 +221,7 @@ void RequestPieceFromPeer(string peerIp, string piece, bool firstPiece)
     }
     catch (Exception ex)
     {
-        Console.WriteLine($"{DateTime.Now:dd/MM/yyyy HH:mm:ss} | <= ({peerIp}): Erro ao requisitar peça '{piece}': {ex.Message}");
+        PeerClientLogger.Log($"{DateTime.Now:dd/MM/yyyy HH:mm:ss} | <= ({peerIp}:6000): Erro ao requisitar peça '{piece}': {ex.Message}");
     }
     finally
     {
@@ -238,7 +238,7 @@ void StartPeerServer()
     {
         TcpListener listener = new(IPAddress.Any, 6000);
         listener.Start();
-        Console.WriteLine("Servidor TCP iniciado na porta 6000.");
+        PeerClientLogger.Log("Servidor TCP iniciado na porta 6000.");
 
         while (true)
         {
@@ -247,7 +247,7 @@ void StartPeerServer()
                 using TcpClient client = listener.AcceptTcpClient();
                 if (client.Client?.RemoteEndPoint is not IPEndPoint remoteEndPoint)
                 {
-                    Console.WriteLine($"{DateTime.Now:dd/MM/yyyy HH:mm:ss} | (Interno): Falha ao obter o endereço remoto do cliente.");
+                    PeerClientLogger.Log($"{DateTime.Now:dd/MM/yyyy HH:mm:ss} | (Interno): Falha ao obter o endereço remoto do cliente.");
                     continue;
                 }
 
@@ -258,14 +258,14 @@ void StartPeerServer()
                 int bytesRead = stream.Read(buffer, 0, buffer.Length);
                 string requestedPiece = Encoding.UTF8.GetString(buffer, 0, bytesRead);
 
-                Console.WriteLine($"{DateTime.Now:dd/MM/yyyy HH:mm:ss} | <= ({clientIp}): Peça '{requestedPiece}' requisitada");
+                PeerClientLogger.Log($"{DateTime.Now:dd/MM/yyyy HH:mm:ss} | <= ({clientIp}:{remoteEndPoint.Port}): Peça '{requestedPiece}' requisitada");
 
                 string filePath = Path.Combine(folderPath, requestedPiece + ".txt");
                 if (File.Exists(filePath))
                 {
                     byte[] fileData = File.ReadAllBytes(filePath);
                     stream.Write(fileData, 0, fileData.Length);
-                    Console.WriteLine($"{DateTime.Now:dd/MM/yyyy HH:mm:ss} | => ({clientIp}): Peça '{requestedPiece}' enviada");
+                    PeerClientLogger.Log($"{DateTime.Now:dd/MM/yyyy HH:mm:ss} | => ({clientIp}:{remoteEndPoint.Port}): Peça '{requestedPiece}' enviada");
                 }
                 else
                 {
@@ -273,12 +273,12 @@ void StartPeerServer()
                     string errorMsg = "PIECE_NOT_FOUND";
                     byte[] errorBytes = Encoding.UTF8.GetBytes(errorMsg);
                     stream.Write(errorBytes, 0, errorBytes.Length);
-                    Console.WriteLine($"{DateTime.Now:dd/MM/yyyy HH:mm:ss} | => ({clientIp}): Peça '{requestedPiece}' requisitada não encontrada (PIECE_NOT_FOUND enviado)");
+                    PeerClientLogger.Log($"{DateTime.Now:dd/MM/yyyy HH:mm:ss} | => ({clientIp}:{remoteEndPoint.Port}): Peça '{requestedPiece}' requisitada não encontrada (PIECE_NOT_FOUND enviado)");
                 }
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"{DateTime.Now:dd/MM/yyyy HH:mm:ss} | (Interno): Falha ao enviar peça requisitada: " + ex.Message);
+                PeerClientLogger.Log($"{DateTime.Now:dd/MM/yyyy HH:mm:ss} | (Interno): Falha ao enviar peça requisitada: " + ex.Message);
             }
         }
     }).Start();
@@ -296,7 +296,7 @@ void StartPeerUpdater()
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"{DateTime.Now:dd/MM/yyyy HH:mm:ss} | (Interno): Erro ao atualizar peers do tracker: {ex.Message}");
+                PeerClientLogger.Log($"{DateTime.Now:dd/MM/yyyy HH:mm:ss} | (Interno): Erro ao atualizar peers do tracker: {ex.Message}");
             }
             Thread.Sleep(1000); // 1 segundo
         }

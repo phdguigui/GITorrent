@@ -9,7 +9,7 @@ Dictionary<string, DateTime> _lastSeen = new();
 string _clientAddress = string.Empty;
 
 IPEndPoint remoteEP = new IPEndPoint(IPAddress.Any, 0);
-Console.WriteLine($"Tracker iniciado no endereço: {GetCurrentIP()}:5000\n");
+TrackerLogger.Log($"Tracker iniciado no endereço: {GetCurrentIP()}:5000\n");
 
 // Thread de limpeza de peers inativos
 new Thread(() =>
@@ -23,7 +23,7 @@ new Thread(() =>
         {
             _peerList.Remove(peer);
             _lastSeen.Remove(peer);
-            Console.WriteLine($"{DateTime.Now:dd/MM/yyyy HH:mm:ss} | (Tracker): Removido peer inativo: {peer}");
+            TrackerLogger.Log($"{DateTime.Now:dd/MM/yyyy HH:mm:ss} | (Tracker): Removido peer inativo: {peer}");
         }
     }
 })
@@ -37,12 +37,12 @@ while (true)
 
     if (message == "JOIN_REQUEST")
     {
-        Console.WriteLine($"{DateTime.Now:dd/MM/yyyy HH:mm:ss} | <= ({_clientAddress}:{remoteEP.Port}): {message}");
+        TrackerLogger.Log($"{DateTime.Now:dd/MM/yyyy HH:mm:ss} | <= ({_clientAddress}:{remoteEP.Port}): {message}");
         JoinRequestHandler();
     }
     else if (message.StartsWith("HAVE_PIECE"))
     {
-        Console.WriteLine($"{DateTime.Now:dd/MM/yyyy HH:mm:ss} | <= ({_clientAddress}:{remoteEP.Port}): Atualização de peças");
+        TrackerLogger.Log($"{DateTime.Now:dd/MM/yyyy HH:mm:ss} | <= ({_clientAddress}:{remoteEP.Port}): Atualização de peças");
         HavePieceHandler(message);
     }
     else if (message == "GET_PEERS")
@@ -72,7 +72,7 @@ void JoinRequestHandler()
     string response = BuildPeersResponse(excludePeer: peerAddress);
     byte[] responseData = Encoding.UTF8.GetBytes(response);
     _udpServer.Send(responseData, responseData.Length, remoteEP);
-    Console.WriteLine($"{DateTime.Now:dd/MM/yyyy HH:mm:ss} | => ({peerAddress}:{remoteEP.Port}): Lista de peers e respectivos pedaços (Join Request)");
+    TrackerLogger.Log($"{DateTime.Now:dd/MM/yyyy HH:mm:ss} | => ({peerAddress}:{remoteEP.Port}): Lista de peers e respectivos pedaços (Join Request)");
 }
 
 void GetPeersHandler()
@@ -85,7 +85,7 @@ void GetPeersHandler()
     string response = BuildPeersResponse(excludePeer: null);
     byte[] responseData = Encoding.UTF8.GetBytes(response);
     _udpServer.Send(responseData, responseData.Length, remoteEP);
-    Console.WriteLine($"{DateTime.Now:dd/MM/yyyy HH:mm:ss} | => ({peerAddress}:{remoteEP.Port}): Lista atualizada de peers e respectivos pedaços");
+    TrackerLogger.Log($"{DateTime.Now:dd/MM/yyyy HH:mm:ss} | => ({peerAddress}:{remoteEP.Port}): Lista atualizada de peers e respectivos pedaços");
 }
 
 string BuildPeersResponse(string? excludePeer)
