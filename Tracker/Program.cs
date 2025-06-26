@@ -37,12 +37,12 @@ while (true)
 
     if (message == "JOIN_REQUEST")
     {
-        Console.WriteLine($"{DateTime.Now:dd/MM/yyyy HH:mm:ss} | <= ({_clientAddress}): {message}");
+        Console.WriteLine($"{DateTime.Now:dd/MM/yyyy HH:mm:ss} | <= ({_clientAddress}:{remoteEP.Port}): {message}");
         JoinRequestHandler();
     }
     else if (message.StartsWith("HAVE_PIECE"))
     {
-        Console.WriteLine($"{DateTime.Now:dd/MM/yyyy HH:mm:ss} | <= ({_clientAddress}): Atualização de peças");
+        Console.WriteLine($"{DateTime.Now:dd/MM/yyyy HH:mm:ss} | <= ({_clientAddress}:{remoteEP.Port}): Atualização de peças");
         HavePieceHandler(message);
     }
     else if (message == "GET_PEERS")
@@ -72,7 +72,7 @@ void JoinRequestHandler()
     string response = BuildPeersResponse(excludePeer: peerAddress);
     byte[] responseData = Encoding.UTF8.GetBytes(response);
     _udpServer.Send(responseData, responseData.Length, remoteEP);
-    Console.WriteLine($"{DateTime.Now:dd/MM/yyyy HH:mm:ss} | => ({peerAddress}): Lista de peers e respectivos pedaços (Join Request)");
+    Console.WriteLine($"{DateTime.Now:dd/MM/yyyy HH:mm:ss} | => ({peerAddress}:{remoteEP.Port}): Lista de peers e respectivos pedaços (Join Request)");
 }
 
 void GetPeersHandler()
@@ -85,7 +85,7 @@ void GetPeersHandler()
     string response = BuildPeersResponse(excludePeer: null);
     byte[] responseData = Encoding.UTF8.GetBytes(response);
     _udpServer.Send(responseData, responseData.Length, remoteEP);
-    Console.WriteLine($"{DateTime.Now:dd/MM/yyyy HH:mm:ss} | => ({peerAddress}): Lista atualizada de peers e respectivos pedaços");
+    Console.WriteLine($"{DateTime.Now:dd/MM/yyyy HH:mm:ss} | => ({peerAddress}:{remoteEP.Port}): Lista atualizada de peers e respectivos pedaços");
 }
 
 string BuildPeersResponse(string? excludePeer)
