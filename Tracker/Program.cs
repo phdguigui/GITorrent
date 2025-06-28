@@ -35,16 +35,19 @@ while (true)
     string message = Encoding.UTF8.GetString(data);
     _clientAddress = $"{remoteEP.Address}";
 
+    // Recebeu mensagem de join ao torrent
     if (message == "JOIN_REQUEST")
     {
         TrackerLogger.Log($"{DateTime.Now:dd/MM/yyyy HH:mm:ss} | <= ({_clientAddress}:{remoteEP.Port}): {message}");
         JoinRequestHandler();
     }
+    // Recebeu atualização de peças do peer
     else if (message.StartsWith("HAVE_PIECE"))
     {
         TrackerLogger.Log($"{DateTime.Now:dd/MM/yyyy HH:mm:ss} | <= ({_clientAddress}:{remoteEP.Port}): Atualização de peças");
         HavePieceHandler(message);
     }
+    // Requisitou a lista de peers
     else if (message == "GET_PEERS")
     {
         // Atualiza o tempo do peer
@@ -60,6 +63,7 @@ void JoinRequestHandler()
 {
     string peerAddress = $"{remoteEP.Address}";
 
+    // Adiciona o peer à lista se não existir
     if (!_peerList.ContainsKey(peerAddress))
     {
         _peerList[peerAddress] = [];
@@ -69,6 +73,7 @@ void JoinRequestHandler()
         _lastSeen[peerAddress] = DateTime.Now;
     }
 
+    // Envia a lista de peers, excluindo o peer que acabou de se juntar
     string response = BuildPeersResponse(excludePeer: peerAddress);
     byte[] responseData = Encoding.UTF8.GetBytes(response);
     _udpServer.Send(responseData, responseData.Length, remoteEP);
@@ -82,6 +87,7 @@ void GetPeersHandler()
     {
         _lastSeen[peerAddress] = DateTime.Now;
     }
+    // Concatena os IPs e peças
     string response = BuildPeersResponse(excludePeer: null);
     byte[] responseData = Encoding.UTF8.GetBytes(response);
     _udpServer.Send(responseData, responseData.Length, remoteEP);
@@ -105,6 +111,7 @@ string BuildPeersResponse(string? excludePeer)
 
 void HavePieceHandler(string message)
 {
+    // Atualiza as peças do peer
     _peerList[_clientAddress] = message.Split("|")[1].Split(",").ToList();
     lock (_lastSeen)
     {

@@ -17,27 +17,36 @@ UdpClient udpClient = new(0);
 
 try
 {
+    // Pega IP local
     string localIp = GetCurrentIP();
+    // Pega a porta local
     int localPort = (udpClient.Client?.LocalEndPoint as IPEndPoint)?.Port ??
         throw new InvalidOperationException("LocalEndPoint ou Port não está definido.");
 
+    // Mostra as informações iniciais
     PeerClientLogger.Log($"IP local detectado: {localIp}");
     PeerClientLogger.Log($"Porta local escolhida: {localPort}\n");
 
+    // Envia o JoinRequest para o tracker
     var peerIps = SendJoinRequest();
+    // Inicia servidor para requisição de peças
     StartPeerServer();
 
     var initialPieces = VerifyPieces();
+    // Se houver peças iniciais, envia a mensagem HAVE_PIECE
     if (initialPieces.Count > 0)
     {
         SendHavePiece();
     }
+    // Se não for o primeiro tenta buscar a primeira peça/conexão
     if (!_amIFirst)
     {
         FirstConnection();
     }
 
+    // Servidor que envia o HAVE_PIECE a cada 3 segundos
     StartHavePieceUpdater();
+    // Atualiza os peers a cada segundo para o tracker
     StartPeerUpdater();
 }
 catch (Exception ex)
@@ -68,13 +77,17 @@ List<string> VerifyPieces()
 
 List<string> SendJoinRequest()
 {
+    // Chama método de envio de mensagens ao tracker
     var trackerEndpoint = SendMessageTracker("JOIN_REQUEST");
+    // Escuta a resposta do tracker
     var peersAndPieces = ListenMessageTracker(trackerEndpoint);
 
+    // Sou o primeiro?
     _amIFirst = peersAndPieces.Split("|")[1].ToString() == "NONE";
 
     var peerIps = new List<string>();
 
+    // Se não for o primeiro, armazena os peers e peças
     if (!_amIFirst)
     {
         var piersAndPiecesFormatted = peersAndPieces.Split("|")[1].Split(" ")[0].Remove(peersAndPieces.Split("|")[1].Split(" ")[0].Length - 1).Split(";");
@@ -105,14 +118,19 @@ void SendHavePiece()
 
 IPEndPoint SendMessageTracker(string message)
 {
+    // Transforma mensagem em cadeia de bytes
     byte[] data = Encoding.UTF8.GetBytes(message);
+    // Cria instância UDP do tracker
     IPEndPoint trackerEndPoint = new IPEndPoint(IPAddress.Parse(trackerIp), trackerPort);
 
+    // Envia a mensagem para o tracker
     udpClient.Send(data, data.Length, trackerEndPoint);
+    // Tratamento de mensagens para HAVE_PIECE
     if (message.Contains("HAVE_PIECE"))
     {
         message = "Atualização de peças";
     }
+    // Apresenta a info no terminal
     PeerClientLogger.Log($"{DateTime.Now:dd/MM/yyyy HH:mm:ss} | => (Tracker): {message}");
 
     return trackerEndPoint;
@@ -145,6 +163,7 @@ void RarestFirst()
         }
     }
 
+    // Verifica os pedaços faltantes
     var missingPieces = _peersByPiece
         .Where(p => !_myPieces.Contains(p.Key))
         .ToList();
@@ -154,6 +173,7 @@ void RarestFirst()
 
     int minRarity = missingPieces.Min(p => p.Value.Count);
 
+    // Verifica a peça mais rara
     var rarestPiece = missingPieces
         .Where(p => p.Value.Count == minRarity)
         .Select(p => p.Key)
@@ -170,7 +190,9 @@ void RarestFirst()
         }
     }
 
+    // Procura peers que possuem a peça mais rara
     var peers = _peersByPiece[rarestPiece];
+    // Escolhe de forma aleatória
     var chosenPeer = peers[new Random().Next(peers.Count)];
 
     // Download síncrono, aguarda terminar antes de pegar o próximo rarest
@@ -181,6 +203,7 @@ void RequestPieceFromPeer(string peerIp, string piece, bool firstPiece)
 {
     try
     {
+        // Conecta ao peer na porta 6000
         using TcpClient client = new();
         client.Connect(IPAddress.Parse(peerIp), 6000);
 
@@ -188,6 +211,7 @@ void RequestPieceFromPeer(string peerIp, string piece, bool firstPiece)
         byte[] requestBytes = Encoding.UTF8.GetBytes(piece);
         stream.Write(requestBytes, 0, requestBytes.Length);
 
+        // Se primeira peça
         string firstPieceAppend = firstPiece ? "(First Piece)" : "";
 
         PeerClientLogger.Log($"{DateTime.Now:dd/MM/yyyy HH:mm:ss} | => ({peerIp}:6000): Peça '{piece}' solicitada {firstPieceAppend}");
@@ -201,6 +225,7 @@ void RequestPieceFromPeer(string peerIp, string piece, bool firstPiece)
         }
 
         var receivedData = ms.ToArray();
+        // Passa a mensagem para string
         string message = Encoding.UTF8.GetString(receivedData);
 
         if (message == "PIECE_NOT_FOUND")
@@ -210,6 +235,7 @@ void RequestPieceFromPeer(string peerIp, string piece, bool firstPiece)
         }
 
         string filePath = Path.Combine(folderPath, piece + ".txt");
+        // Escreve o arquivo com base nos bytes recebidos
         File.WriteAllBytes(filePath, receivedData);
         PeerClientLogger.Log($"{DateTime.Now:dd/MM/yyyy HH:mm:ss} | <= ({peerIp}:6000): Peça '{piece}' recebida");
 
@@ -234,50 +260,76 @@ void RequestPieceFromPeer(string peerIp, string piece, bool firstPiece)
 
 void StartPeerServer()
 {
+    // Cria e inicia uma nova thread para executar o servidor TCP
     new Thread(() =>
     {
+        // Cria um listener TCP que escuta em todas as interfaces de rede na porta 6000
         TcpListener listener = new(IPAddress.Any, 6000);
         listener.Start();
         PeerClientLogger.Log("Servidor TCP iniciado na porta 6000.");
 
+        // Loop principal do servidor: aceita conexões indefinidamente
         while (true)
         {
             try
             {
+                // Aceita uma conexão de cliente TCP
                 using TcpClient client = listener.AcceptTcpClient();
+
+                // Obtém o endereço IP e porta do cliente conectado
                 if (client.Client?.RemoteEndPoint is not IPEndPoint remoteEndPoint)
                 {
                     PeerClientLogger.Log($"{DateTime.Now:dd/MM/yyyy HH:mm:ss} | (Interno): Falha ao obter o endereço remoto do cliente.");
-                    continue;
+                    continue; // Pula para a próxima iteração se não conseguir o endereço
                 }
 
+                // Extrai o IP do cliente para uso em logs
                 string clientIp = remoteEndPoint.Address.ToString();
+
+                // Obtém o stream de rede associado ao cliente
                 using NetworkStream stream = client.GetStream();
 
+                // Cria um buffer para ler os dados recebidos do cliente
                 byte[] buffer = new byte[4096];
+
+                // Lê os dados enviados pelo cliente (nome da peça/arquivo solicitado)
                 int bytesRead = stream.Read(buffer, 0, buffer.Length);
+
+                // Converte os bytes recebidos para string (nome do arquivo requisitado)
                 string requestedPiece = Encoding.UTF8.GetString(buffer, 0, bytesRead);
 
+                // Loga a requisição recebida
                 PeerClientLogger.Log($"{DateTime.Now:dd/MM/yyyy HH:mm:ss} | <= ({clientIp}:{remoteEndPoint.Port}): Peça '{requestedPiece}' requisitada");
 
+                // Monta o caminho completo do arquivo solicitado (adiciona .txt)
                 string filePath = Path.Combine(folderPath, requestedPiece + ".txt");
+
+                // Verifica se o arquivo existe
                 if (File.Exists(filePath))
                 {
+                    // Lê o arquivo em bytes
                     byte[] fileData = File.ReadAllBytes(filePath);
+
+                    // Envia o arquivo para o cliente pelo stream
                     stream.Write(fileData, 0, fileData.Length);
+
+                    // Loga que a peça foi enviada
                     PeerClientLogger.Log($"{DateTime.Now:dd/MM/yyyy HH:mm:ss} | => ({clientIp}:{remoteEndPoint.Port}): Peça '{requestedPiece}' enviada");
                 }
                 else
                 {
-                    // Envia "PIECE_NOT_FOUND"
+                    // Caso o arquivo não exista, envia mensagem de erro "PIECE_NOT_FOUND"
                     string errorMsg = "PIECE_NOT_FOUND";
                     byte[] errorBytes = Encoding.UTF8.GetBytes(errorMsg);
                     stream.Write(errorBytes, 0, errorBytes.Length);
+
+                    // Loga que a peça não foi encontrada
                     PeerClientLogger.Log($"{DateTime.Now:dd/MM/yyyy HH:mm:ss} | => ({clientIp}:{remoteEndPoint.Port}): Peça '{requestedPiece}' requisitada não encontrada (PIECE_NOT_FOUND enviado)");
                 }
             }
             catch (Exception ex)
             {
+                // Em caso de erro, loga a exceção
                 PeerClientLogger.Log($"{DateTime.Now:dd/MM/yyyy HH:mm:ss} | (Interno): Falha ao enviar peça requisitada: " + ex.Message);
             }
         }
@@ -376,9 +428,11 @@ void RequestMissingPieces()
     }
     lock (myPiecesLock)
     {
+        // Verifica peças faltantes
         missingPieces = currentPeersByPiece.Keys.Where(p => !_myPieces.Contains(p)).ToList();
     }
 
+    // Se houver peças, requisita
     if (missingPieces.Count > 0)
     {
         var tasks = new List<Task>();
@@ -399,16 +453,20 @@ void RequestMissingPieces()
             if (!deveBaixar)
                 continue;
 
+            // Seleciona peers por peça
             var peerIps = currentPeersByPiece[piece];
             if (peerIps == null || peerIps.Count == 0)
                 continue;
 
+            // Escolhe um peer aleatório, por peça escolhida
             var chosenPeer = peerIps[new Random().Next(peerIps.Count)];
             tasks.Add(Task.Run(() =>
             {
+                // Requisita a peça do peer escolhido
                 RequestPieceFromPeer(chosenPeer, piece, false);
             }));
         }
+        // Cria as tasks e as aguarda
         Task.WaitAll(tasks.ToArray());
     }
 }
