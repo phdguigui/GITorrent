@@ -56,6 +56,8 @@ The system is composed of two main modules: **Tracker** and **PeerClient**.
 5. With the build done, execute the `dotnet run` command;
 6. Then your PeerClient/Tracker will be running.
 
+Ps.: Don't forget to change the tracker IP address in PeerClient code to the your Tracker IP address.
+
 ---
 
 ## 📌 Notes
@@ -132,6 +134,8 @@ O sistema é composto por dois módulos principais: **Tracker** e **PeerClient**
 4. Execute o comando `dotnet build`;
 5. Com o build concluído, execute o comando `dotnet run`;
 6. Pronto, seu PeerClient/Tracker estará rodando.
+
+Obs.: Não se esqueça de alterar o valor do endereço IP do tracker no código do PeerClient para o endereço IP correto do seu tracker.
 
 ---
 
